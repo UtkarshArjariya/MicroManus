@@ -4,35 +4,208 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 173 58% 26%;
-    --primary-foreground: 180 35% 96%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 34 95% 92%;
-    --accent-foreground: 24 65% 18%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 173 58% 26%;
-    --radius: 0.5rem;
+    --paper: #edeae1;
+    --ink: #1b2430;
+    --ink-muted: #5b6570;
+    --accent-ochre: #c98a2c;
+    --verified-pine: #3d6259;
+    --flag-brick: #a6402f;
+    --paper-surface: #f4f1e9;
+    --paper-deep: #e3dfd4;
+
+    --paper-rgb: 237 234 225;
+    --ink-rgb: 27 36 48;
+    --ink-muted-rgb: 91 101 112;
+    --accent-ochre-rgb: 201 138 44;
+    --verified-pine-rgb: 61 98 89;
+    --flag-brick-rgb: 166 64 47;
+    --paper-surface-rgb: 244 241 233;
+    --paper-deep-rgb: 227 223 212;
+
+    --background: var(--paper-rgb);
+    --foreground: var(--ink-rgb);
+    --card: var(--paper-surface-rgb);
+    --card-foreground: var(--ink-rgb);
+    --popover: var(--paper-surface-rgb);
+    --popover-foreground: var(--ink-rgb);
+    --primary: var(--accent-ochre-rgb);
+    --primary-foreground: var(--ink-rgb);
+    --secondary: var(--paper-deep-rgb);
+    --secondary-foreground: var(--ink-rgb);
+    --muted: var(--paper-deep-rgb);
+    --muted-foreground: var(--ink-muted-rgb);
+    --accent: var(--paper-surface-rgb);
+    --accent-foreground: var(--ink-rgb);
+    --destructive: var(--flag-brick-rgb);
+    --destructive-foreground: var(--paper-surface-rgb);
+    --border: var(--ink-rgb);
+    --input: var(--ink-rgb);
+    --ring: var(--accent-ochre-rgb);
+    --radius: 0.25rem;
   }
 
   * {
-    @apply border-border;
+    @apply border-border/20;
+  }
+
+  html {
+    @apply bg-paper;
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
-    font-family:
-      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    @apply min-h-screen bg-paper font-body text-ink antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-fraunces), Fraunces, Georgia, serif;
+    font-optical-sizing: auto;
+    font-variation-settings: "opsz" 24, "SOFT" 45, "WONK" 0;
+  }
+
+  ::selection {
+    background: rgb(var(--accent-ochre-rgb) / 0.3);
+  }
+
+  :where(a, button, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--accent-ochre);
+    outline-offset: 3px;
+  }
+
+  button,
+  [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:active:not(:disabled),
+  [role="button"]:active {
+    transform: scale(0.98);
+  }
+}
+
+@layer components {
+  .utility-label {
+    @apply font-body text-[0.66rem] font-semibold uppercase tracking-[0.18em] text-ink-muted;
+  }
+
+  .paper-rule {
+    @apply border-ink/20;
+  }
+
+  .credit-stamp {
+    --stamp-color: var(--accent-ochre);
+    position: relative;
+    display: grid;
+    width: 4.4rem;
+    aspect-ratio: 1;
+    flex: none;
+    place-items: center;
+    border: 1.5px solid var(--stamp-color);
+    border-radius: 9999px;
+    background: var(--paper-surface);
+    color: var(--stamp-color);
+    isolation: isolate;
+  }
+
+  .credit-stamp::before {
+    position: absolute;
+    z-index: -1;
+    inset: -4px;
+    border: 1px dashed var(--stamp-color);
+    border-radius: inherit;
+    content: "";
+    transform: rotate(7deg);
+  }
+
+  .credit-stamp::after {
+    position: absolute;
+    inset: 5px;
+    border: 1px solid color-mix(in srgb, var(--stamp-color) 55%, transparent);
+    border-radius: inherit;
+    content: "";
+  }
+
+  .credit-stamp[data-low="true"] {
+    --stamp-color: var(--flag-brick);
+  }
+
+  .credit-stamp__value {
+    @apply relative z-10 -mt-2 font-mono text-xl font-semibold leading-none;
+  }
+
+  .credit-stamp__label {
+    @apply absolute bottom-[0.8rem] z-10 font-mono text-[0.48rem] font-semibold tracking-[0.14em];
+    transform: rotate(-5deg);
+  }
+
+  .case-notice {
+    @apply border-l-2 bg-paper-deep/60 px-3 py-2 text-sm text-ink;
+  }
+
+  .case-notice[data-tone="error"] {
+    @apply border-brick text-brick;
+  }
+
+  .case-notice[data-tone="success"] {
+    @apply border-pine text-pine;
+  }
+
+  .case-notice[data-tone="info"] {
+    @apply border-ochre;
+  }
+
+  .trace-step {
+    animation: log-write 220ms ease-out both;
+  }
+
+  .research-prose {
+    @apply text-[0.95rem] leading-7 text-ink;
+  }
+
+  .research-prose > :first-child {
+    margin-top: 0;
+  }
+
+  .research-prose h1,
+  .research-prose h2,
+  .research-prose h3 {
+    @apply mt-6 text-ink;
+  }
+
+  .research-prose a {
+    @apply text-ochre underline decoration-ochre/50 underline-offset-4;
+  }
+
+  .research-prose pre {
+    @apply mt-4 overflow-x-auto border border-ink/20 bg-ink p-4 font-mono text-xs leading-6 text-paper-surface;
+  }
+}
+
+@keyframes log-write {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  button:active:not(:disabled),
+  [role="button"]:active {
+    transform: none;
   }
 }
