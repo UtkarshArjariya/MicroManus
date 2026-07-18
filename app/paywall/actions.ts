@@ -15,7 +15,7 @@ export async function redeemCoupon(_previousState: RedeemState, formData: FormDa
   const code = normalizeCouponCode(String(formData.get("code") ?? ""));
 
   if (code !== VALID_COUPON_CODE) {
-    return { error: "That coupon code is not valid." };
+    return { error: "That code didn’t match our records. Try again, or pay by card instead." };
   }
 
   let user;
@@ -30,7 +30,7 @@ export async function redeemCoupon(_previousState: RedeemState, formData: FormDa
     }
   } catch (error) {
     logServerError("action/coupon.auth", error);
-    return { error: "Could not verify your session. Try again." };
+    return { error: "Your session ended. Sign in again, then retry the code." };
   }
 
   if (!user) {
@@ -48,14 +48,14 @@ export async function redeemCoupon(_previousState: RedeemState, formData: FormDa
     if (error) {
       logServerError("action/coupon.redeem", error, { userId: user.id });
       if (error.message.includes("coupon_already_redeemed")) {
-        return { error: "You have already redeemed a coupon. You can still unlock with card payment." };
+        return { error: "That code has already been used on this account. Pay by card to add more credits." };
       }
 
-      return { error: "Could not redeem the coupon. Try again in a moment." };
+      return { error: "We couldn’t check that code. Try again in a moment, or pay by card instead." };
     }
   } catch (error) {
     logServerError("action/coupon", error, { userId: user.id });
-    return { error: "Could not redeem the coupon. Try again in a moment." };
+    return { error: "We couldn’t check that code. Try again in a moment, or pay by card instead." };
   }
 
   redirect("/app");
