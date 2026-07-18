@@ -450,7 +450,7 @@ async function validatePublicHttpUrl(url: string): Promise<URL | { error: string
       return { error: "Private or local network URLs cannot be fetched." };
     }
   } catch {
-    return { error: "Could not resolve URL host." };
+    return { error: "That source address could not be found. Check the URL or choose another source." };
   }
 
   return parsed;
@@ -549,7 +549,7 @@ async function generatePdfReport(input: unknown, context: ToolRunContext) {
         messageId: context.messageId,
         storagePath,
       });
-      return { error: `PDF upload failed: ${uploadError.message}` };
+      return { error: "The report file could not be stored. Try generating the report again." };
     }
 
     const { data: artifact, error: insertError } = await admin
@@ -572,7 +572,7 @@ async function generatePdfReport(input: unknown, context: ToolRunContext) {
         messageId: context.messageId,
         storagePath,
       });
-      return { error: `Report metadata insert failed: ${insertError?.message ?? "Unknown error"}` };
+      return { error: "The report record could not be saved. Try generating the report again." };
     }
 
     const signedUrl = await createReportSignedUrl(storagePath, parsed.title);
@@ -597,20 +597,18 @@ async function generatePdfReport(input: unknown, context: ToolRunContext) {
       chatId: context.chatId,
       messageId: context.messageId,
     });
-    return {
-      error: `Report generation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-    };
+    return { error: "The PDF report could not be generated. Check the report content and try again." };
   }
 }
 
 async function webSearch(query: string): Promise<{ results?: SearchResult[]; error?: string }> {
   if (!query.trim()) {
-    return { error: "Missing search query." };
+    return { error: "Enter a search query before running web search." };
   }
 
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) {
-    return { error: "BRAVE_SEARCH_API_KEY is not configured on the server." };
+    return { error: "Web search is not available right now. Continue with the available sources or retry later." };
   }
 
   const url = new URL("https://api.search.brave.com/res/v1/web/search");
@@ -645,7 +643,7 @@ async function webSearch(query: string): Promise<{ results?: SearchResult[]; err
       status: response.status,
       query: query.slice(0, 120),
     });
-    return { error: `Brave Search failed with HTTP ${response.status}.` };
+    return { error: "Web search could not complete this request. Retry in a moment." };
   }
 
   let payload: {
@@ -662,7 +660,7 @@ async function webSearch(query: string): Promise<{ results?: SearchResult[]; err
     payload = (await response.json()) as typeof payload;
   } catch (error) {
     logServerError("agent/web-search.parse", error, { query: query.slice(0, 120) });
-    return { error: "Brave Search returned an invalid response." };
+    return { error: "Web search returned an unreadable response. Retry in a moment." };
   }
 
   return {
@@ -696,8 +694,8 @@ async function fetchPage(url: string): Promise<{ url?: string; text?: string; er
     return {
       url,
       error: error instanceof Error && error.name === "AbortError"
-        ? "Fetch timed out."
-        : "Fetch failed before a response was received.",
+        ? "The source took too long to respond. Try another source or retry in a moment."
+        : "The source could not be reached. Check the URL or try another source.",
     };
   } finally {
     timeout.clear();
@@ -708,7 +706,7 @@ async function fetchPage(url: string): Promise<{ url?: string; text?: string; er
       status: response.status,
       url: validated.toString(),
     });
-    return { url, error: `Fetch failed with HTTP ${response.status}.` };
+    return { url, error: "The source did not return a readable page. Try another source." };
   }
 
   const contentLength = Number(response.headers.get("content-length") ?? "0");
