@@ -5,20 +5,21 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:h-4 [&_svg]:w-4",
+  "inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-transparent px-4 py-2 font-body text-sm font-semibold transition-[background-color,color,border-color,transform] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-45 [&_svg]:h-4 [&_svg]:w-4",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-        outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
+        default: "border-ochre bg-ochre text-ink hover:bg-ochre/85",
+        destructive: "border-brick bg-transparent text-brick hover:bg-brick hover:text-paper-surface",
+        outline: "border-ink/40 bg-transparent text-ink hover:border-ink hover:bg-paper-surface",
+        secondary: "border-ink/10 bg-paper-deep text-ink hover:border-ink/30",
+        ghost: "text-ink hover:bg-paper-deep/70",
+        text: "h-auto border-0 bg-transparent px-1 py-0 text-ochre underline-offset-4 hover:underline",
       },
       size: {
         default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
+        sm: "h-8 rounded-sm px-3 text-xs",
+        lg: "h-11 rounded-sm px-8",
         icon: "h-10 w-10",
       },
     },
