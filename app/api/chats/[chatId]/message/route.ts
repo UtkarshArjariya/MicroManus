@@ -257,6 +257,7 @@ async function handlePost(request: Request, chatId: string) {
               input_tokens: usage.inputTokens,
               output_tokens: usage.outputTokens,
               cached_input_tokens: usage.cachedInputTokens,
+              cache_write_tokens: usage.cachedWriteTokens,
             });
             const { error } = await admin.from("usage_events").insert({
               chat_id: chatId,
@@ -266,9 +267,11 @@ async function handlePost(request: Request, chatId: string) {
               input_tokens: usage.inputTokens,
               output_tokens: usage.outputTokens,
               cached_input_tokens: usage.cachedInputTokens,
+              cache_write_tokens: usage.cachedWriteTokens,
               input_cost_usd: cost.input_cost_usd,
               output_cost_usd: cost.output_cost_usd,
               cached_cost_usd: cost.cached_cost_usd,
+              cache_write_cost_usd: cost.cache_write_cost_usd,
               total_cost_usd: cost.total_cost_usd,
             });
 
