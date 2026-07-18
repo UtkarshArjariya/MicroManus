@@ -121,7 +121,7 @@ RLS:
 
 The connected Stripe account is India-registered, so international-issued test cards such as `4242 4242 4242 4242` are correctly blocked; use the India-specific card above to test Checkout successfully.
 
-Checkout success returns to `/paywall?stripe=success`, then polls `/api/wallet` until the signed webhook grants credits. Checkout cancellation returns to `/paywall?stripe=cancelled` with no payment state and no credits.
+Standalone checkout success returns to `/paywall?stripe=success`, then polls `/api/wallet` until the signed webhook records that exact Checkout session and grants credits. Billing opened inside the authenticated app supplies an app-local `returnTo`, so Stripe success and cancellation return to the same page with the Billing settings modal preserved. Coupon redemption uses the same validated destination. Only origin-relative paths under `/app` are accepted.
 
 Indian Stripe accounts cannot create USD Checkout Sessions without cross-border export approval. MicroManus therefore prices the unlock at ₹399, a domestic-currency equivalent of the original $5 package; domestic INR pay-to-unlock and its five-credit grant are unchanged, while international cards still require the account’s export approval.
 
