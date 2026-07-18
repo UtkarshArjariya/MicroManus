@@ -6,6 +6,7 @@ import { KeyRound, Loader2, Trash2 } from "lucide-react";
 import { deleteProviderKey, saveProviderKey } from "@/app/app/settings/keys/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { parseJsonResponse } from "@/lib/http";
 import { getDefaultBaseUrl, getDefaultModel, getModelsForProvider, type ProviderId } from "@/lib/models";
 
 type ProviderKeyRow = {
@@ -43,13 +44,24 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
 
   async function testConnection() {
     setStatus("Testing connection...");
-    const response = await fetch("/api/provider-keys/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, apiKey, baseUrl, model }),
-    });
-    const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-    setStatus(payload?.ok ? "Connection succeeded." : payload?.error ?? "Connection failed.");
+    try {
+      const response = await fetch("/api/provider-keys/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, apiKey, baseUrl, model }),
+      });
+
+      if (!response.ok) {
+        const errorPayload = await parseJsonResponse<{ error?: string }>(response);
+        setStatus(errorPayload?.error ?? "Something went wrong. Try again.");
+        return;
+      }
+
+      const payload = await parseJsonResponse<{ ok?: boolean }>(response);
+      setStatus(payload?.ok ? "Connection succeeded." : "Something went wrong. Try again.");
+    } catch {
+      setStatus("Something went wrong. Try again.");
+    }
   }
 
   return (
@@ -57,8 +69,14 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
       action={(formData) => {
         startTransition(async () => {
           setStatus(null);
-          await saveProviderKey(formData);
-          if (!existing) {
+          const result = await saveProviderKey(formData);
+          if (result.error) {
+            setStatus(result.error);
+            return;
+          }
+
+          setStatus(existing ? "Provider key updated." : "Provider key added.");
+          if (!existing && result.ok) {
             setApiKey("");
           }
         });
@@ -146,6 +164,32 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
   );
 }
 
+function DeleteKeyForm({ id }: { id: string }) {
+  const [status, setStatus] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  return (
+    <form
+      action={(formData) => {
+        startTransition(async () => {
+          setStatus(null);
+          const result = await deleteProviderKey(formData);
+          if (result.error) {
+            setStatus(result.error);
+          }
+        });
+      }}
+    >
+      <input name="id" type="hidden" value={id} />
+      <Button disabled={isPending} type="submit" size="sm" variant="destructive">
+        {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+        Delete
+      </Button>
+      {status ? <p className="mt-2 max-w-56 text-sm text-destructive">{status}</p> : null}
+    </form>
+  );
+}
+
 export function KeysClient({ keys }: { keys: ProviderKeyRow[] }) {
   return (
     <div className="space-y-6">
@@ -167,13 +211,7 @@ export function KeysClient({ keys }: { keys: ProviderKeyRow[] }) {
                   </p>
                   {key.base_url ? <p className="break-all text-xs text-muted-foreground">{key.base_url}</p> : null}
                 </div>
-                <form action={deleteProviderKey}>
-                  <input name="id" type="hidden" value={key.id} />
-                  <Button type="submit" size="sm" variant="destructive">
-                    <Trash2 aria-hidden="true" />
-                    Delete
-                  </Button>
-                </form>
+                <DeleteKeyForm id={key.id} />
               </div>
               <details>
                 <summary className="cursor-pointer text-sm font-medium">Edit</summary>
