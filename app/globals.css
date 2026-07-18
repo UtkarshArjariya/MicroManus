@@ -13,6 +13,7 @@
     --paper-surface: #f4f1e9;
     --paper-deep: #e3dfd4;
     --ochre-foreground: #1b2430;
+    --focus-ring: #82540f;
 
     --paper-rgb: 237 234 225;
     --ink-rgb: 27 36 48;
@@ -58,6 +59,7 @@
     --paper-surface: #222722;
     --paper-deep: #2a302a;
     --ochre-foreground: #1a1d1a;
+    --focus-ring: #e0a83e;
 
     --paper-rgb: 26 29 26;
     --ink-rgb: 237 233 222;
@@ -116,7 +118,7 @@
   }
 
   :where(a, button, input, select, textarea, summary):focus-visible {
-    outline: 2px solid var(--accent-ochre);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 3px;
   }
 
@@ -221,11 +223,11 @@
   }
 
   .research-prose a {
-    @apply text-ochre underline decoration-ochre/50 underline-offset-4;
+    @apply text-ink underline decoration-ochre underline-offset-4;
   }
 
   .research-prose pre {
-    @apply mt-4 overflow-x-auto border border-ink/20 bg-ink p-4 font-mono text-xs leading-6 text-paper-surface;
+    @apply mt-4 overflow-x-auto border border-ink/20 bg-paper-deep p-4 font-mono text-xs leading-6 text-ink;
   }
 }
 
