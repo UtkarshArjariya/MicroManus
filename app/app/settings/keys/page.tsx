@@ -17,7 +17,7 @@ export default async function KeysPage() {
 
   const { data: keys } = await supabase
     .from("provider_keys")
-    .select("id, provider, label, base_url, key_last4, default_model, created_at")
+    .select("id, provider, api_format, label, base_url, key_last4, default_model, created_at")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -35,7 +35,7 @@ export default async function KeysPage() {
           <p className="utility-label">Settings · Provider access</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">Research keys</h1>
           <p className="mt-4 max-w-2xl text-sm leading-6 text-ink-muted">
-            Add your own model provider. Key values are encrypted on the server; this page shows only their final four characters.
+            Add OpenAI, Claude, Gemini, or Kimi with only a key, or connect another endpoint using its compatible API format. Key values are encrypted on the server; this page shows only their final four characters.
           </p>
           <div className="mt-8">
             <KeysClient keys={keys ?? []} />
