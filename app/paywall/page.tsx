@@ -27,6 +27,7 @@ export default async function PaywallPage({ searchParams }: PaywallPageProps) {
     .maybeSingle();
   const params = await searchParams;
   const paymentSuccess = params.stripe === "success";
+  const paymentCancelled = params.stripe === "cancelled";
 
   if ((wallet?.balance ?? 0) > 0 && !paymentSuccess) {
     redirect("/app");
@@ -52,7 +53,7 @@ export default async function PaywallPage({ searchParams }: PaywallPageProps) {
               New accounts start at 0 credits. Redeem the launch coupon or use Stripe Checkout to add 5 credits.
             </p>
           </div>
-          <PaywallClient paymentSuccess={paymentSuccess} />
+          <PaywallClient paymentCancelled={paymentCancelled} paymentSuccess={paymentSuccess} />
         </section>
       </div>
     </main>
