@@ -7,6 +7,7 @@ import { redeemCoupon } from "@/app/paywall/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { InterfaceNotice } from "@/components/interface-notice";
 import { STRIPE_UNLOCK_COPY } from "@/lib/credits";
 import { parseJsonResponse } from "@/lib/http";
 
@@ -78,34 +79,38 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
       });
 
       if (!response.ok) {
-        const errorPayload = await parseJsonResponse<{ error?: string }>(response);
-        setCheckoutError(errorPayload?.error ?? "Something went wrong. Try again.");
+        setCheckoutError(
+          response.status === 401
+            ? "Your session ended. Sign in again, then restart checkout."
+            : "We couldn’t start checkout. Try again in a moment.",
+        );
         return;
       }
 
       const data = await parseJsonResponse<{ url?: string }>(response);
       if (!data?.url) {
-        setCheckoutError("Something went wrong. Try again.");
+        setCheckoutError("We couldn’t start checkout. Try again in a moment.");
         return;
       }
 
       window.location.assign(data.url);
     } catch {
-      setCheckoutError("Something went wrong. Try again.");
+      setCheckoutError("We couldn’t reach checkout. Check your connection and try again.");
     } finally {
       setIsStartingCheckout(false);
     }
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Ticket aria-hidden="true" className="h-5 w-5 text-primary" />
+    <div className="grid border border-ink/20 md:grid-cols-2">
+      <Card className="rounded-none border-0 border-b border-ink/20 bg-paper-surface md:border-b-0 md:border-r">
+        <CardHeader className="pb-4">
+          <p className="utility-label">Option 01</p>
+          <CardTitle className="mt-2 flex items-center gap-2 text-2xl">
+            <Ticket aria-hidden="true" className="h-5 w-5 text-ochre" />
             Coupon code
           </CardTitle>
-          <CardDescription>Redeem the launch code for 5 research credits.</CardDescription>
+          <CardDescription>Redeem the launch code for five research credits.</CardDescription>
         </CardHeader>
         <CardContent>
           <form action={couponAction} className="space-y-3">
@@ -113,14 +118,11 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
               aria-label="Coupon code"
               autoCapitalize="characters"
               autoComplete="off"
+              className="font-mono"
               name="code"
               placeholder="SID_DRDROID"
             />
-            {couponState.error ? (
-              <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {couponState.error}
-              </p>
-            ) : null}
+            {couponState.error ? <InterfaceNotice tone="error">{couponState.error}</InterfaceNotice> : null}
             <Button className="w-full" disabled={isRedeeming} type="submit">
               {isRedeeming ? <Loader2 aria-hidden="true" className="animate-spin" /> : <Ticket aria-hidden="true" />}
               Unlock 5 credits
@@ -129,31 +131,24 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <CreditCard aria-hidden="true" className="h-5 w-5 text-primary" />
+      <Card className="rounded-none border-0 bg-paper-surface">
+        <CardHeader className="pb-4">
+          <p className="utility-label">Option 02</p>
+          <CardTitle className="mt-2 flex items-center gap-2 text-2xl">
+            <CreditCard aria-hidden="true" className="h-5 w-5 text-ochre" />
             Card payment
           </CardTitle>
-          <CardDescription>Use Stripe Checkout in test mode for a one-time unlock.</CardDescription>
+          <CardDescription>Use Stripe Checkout for a one-time credit purchase.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {pollMessage ? (
-            <p className="rounded-md border border-primary/25 bg-primary/10 px-3 py-2 text-sm text-primary">
-              {pollMessage}
-            </p>
-          ) : null}
+          {pollMessage ? <InterfaceNotice tone="success">{pollMessage}</InterfaceNotice> : null}
           {paymentCancelled ? (
-            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Checkout was cancelled. No credits were added and no payment was recorded.
-            </p>
+            <InterfaceNotice>
+              Checkout closed before payment. Choose card payment when you&apos;re ready to continue.
+            </InterfaceNotice>
           ) : null}
-          {checkoutError ? (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {checkoutError}
-            </p>
-          ) : null}
-          <Button className="w-full" disabled={isStartingCheckout} onClick={startCheckout} type="button">
+          {checkoutError ? <InterfaceNotice tone="error">{checkoutError}</InterfaceNotice> : null}
+          <Button className="w-full" disabled={isStartingCheckout} onClick={startCheckout} type="button" variant="outline">
             {isStartingCheckout ? (
               <Loader2 aria-hidden="true" className="animate-spin" />
             ) : (
