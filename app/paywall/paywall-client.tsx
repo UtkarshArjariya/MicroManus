@@ -10,10 +10,11 @@ import { Input } from "@/components/ui/input";
 import { STRIPE_UNLOCK_COPY } from "@/lib/credits";
 
 type PaywallClientProps = {
+  paymentCancelled: boolean;
   paymentSuccess: boolean;
 };
 
-export function PaywallClient({ paymentSuccess }: PaywallClientProps) {
+export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClientProps) {
   const [couponState, couponAction, isRedeeming] = useActionState(redeemCoupon, {});
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -127,6 +128,11 @@ export function PaywallClient({ paymentSuccess }: PaywallClientProps) {
           {pollMessage ? (
             <p className="rounded-md border border-primary/25 bg-primary/10 px-3 py-2 text-sm text-primary">
               {pollMessage}
+            </p>
+          ) : null}
+          {paymentCancelled ? (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Checkout was cancelled. No credits were added and no payment was recorded.
             </p>
           ) : null}
           {checkoutError ? (
