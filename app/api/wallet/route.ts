@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 import { jsonInternalError, logServerError } from "@/lib/server-errors";
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET() {
+const STRIPE_SESSION_ID_PATTERN = /^cs_(?:test|live)_[A-Za-z0-9]+$/;
+
+export async function GET(request: Request) {
   let userId: string | undefined;
 
   try {
@@ -18,18 +20,36 @@ export async function GET() {
     }
 
     userId = user.id;
-    const { data, error } = await supabase
-      .from("credit_wallets")
-      .select("balance")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    const stripeSessionId = new URL(request.url).searchParams.get("stripeSessionId");
+    if (stripeSessionId && !STRIPE_SESSION_ID_PATTERN.test(stripeSessionId)) {
+      return NextResponse.json({ error: "Invalid Stripe checkout session." }, { status: 400 });
+    }
 
-    if (error) {
-      logServerError("api/wallet.query", error, { userId });
+    const [walletResult, paymentResult] = await Promise.all([
+      supabase
+        .from("credit_wallets")
+        .select("balance")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      stripeSessionId
+        ? supabase
+            .from("stripe_payments")
+            .select("id")
+            .eq("user_id", user.id)
+            .eq("stripe_session_id", stripeSessionId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+
+    if (walletResult.error || paymentResult.error) {
+      logServerError("api/wallet.query", walletResult.error ?? paymentResult.error, { userId });
       return jsonInternalError("We couldn’t load your credit balance. Refresh the page and try again.");
     }
 
-    return NextResponse.json({ balance: data?.balance ?? 0 });
+    return NextResponse.json({
+      balance: walletResult.data?.balance ?? 0,
+      checkoutFulfilled: stripeSessionId ? Boolean(paymentResult.data) : undefined,
+    });
   } catch (error) {
     logServerError("api/wallet", error, { userId });
     return jsonInternalError();
