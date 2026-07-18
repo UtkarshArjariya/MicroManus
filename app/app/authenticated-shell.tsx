@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
@@ -181,7 +181,7 @@ function SettingsDialog({
   open,
   paymentCancelled,
   paymentSuccess,
-  pathname,
+  returnTo,
   user,
 }: {
   balance: number;
@@ -191,7 +191,7 @@ function SettingsDialog({
   open: boolean;
   paymentCancelled: boolean;
   paymentSuccess: boolean;
-  pathname: string;
+  returnTo: string;
   user: WorkspaceUser;
 }) {
   const router = useRouter();
@@ -307,7 +307,7 @@ function SettingsDialog({
                     embedded
                     paymentCancelled={paymentCancelled}
                     paymentSuccess={paymentSuccess}
-                    returnTo={`${pathname}?settings=billing`}
+                    returnTo={returnTo}
                   />
                 </div>
                 <Button
@@ -346,6 +346,8 @@ export function AuthenticatedShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const searchParamsString = searchParams.toString();
   const [balance, setBalance] = useState(initialBalance);
   const [navOpen, setNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -357,7 +359,7 @@ export function AuthenticatedShell({
   useEffect(() => setNavOpen(false), [pathname]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(searchParamsString);
     const requestedTab = params.get("settings");
     if (settingsTabs.some((item) => item.id === requestedTab)) {
       setSettingsTab(requestedTab as SettingsTab);
@@ -365,7 +367,15 @@ export function AuthenticatedShell({
     }
     setPaymentSuccess(params.get("stripe") === "success");
     setPaymentCancelled(params.get("stripe") === "cancelled");
-  }, [pathname]);
+  }, [searchParamsString]);
+
+  const billingReturnTo = useMemo(() => {
+    const params = new URLSearchParams(searchParamsString);
+    params.delete("stripe");
+    params.delete("stripe_session_id");
+    params.set("settings", "billing");
+    return `${pathname}?${params.toString()}`;
+  }, [pathname, searchParamsString]);
 
   const openSettings = useCallback((tab: SettingsTab = "profile") => {
     setSettingsTab(tab);
@@ -375,15 +385,18 @@ export function AuthenticatedShell({
   const handleSettingsOpenChange = useCallback((open: boolean) => {
     setSettingsOpen(open);
     if (!open) {
-      const params = new URLSearchParams(window.location.search);
-      if (params.has("settings") || params.has("stripe")) {
+      setPaymentSuccess(false);
+      setPaymentCancelled(false);
+      const params = new URLSearchParams(searchParamsString);
+      if (params.has("settings") || params.has("stripe") || params.has("stripe_session_id")) {
         params.delete("settings");
         params.delete("stripe");
+        params.delete("stripe_session_id");
         const query = params.toString();
         router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
       }
     }
-  }, [pathname, router]);
+  }, [pathname, router, searchParamsString]);
 
   const contextValue = useMemo<WorkspaceContextValue>(() => ({
     balance,
@@ -524,7 +537,7 @@ export function AuthenticatedShell({
         open={settingsOpen}
         paymentCancelled={paymentCancelled}
         paymentSuccess={paymentSuccess}
-        pathname={pathname}
+        returnTo={billingReturnTo}
         user={user}
       />
     </WorkspaceContext.Provider>
