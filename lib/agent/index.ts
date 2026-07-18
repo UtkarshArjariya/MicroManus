@@ -16,6 +16,7 @@ import type { ProviderId } from "@/lib/models";
 
 const MAX_AGENT_STEPS = 15;
 const MAX_RESEARCH_CORRECTIONS = 3;
+const MAX_ARTIFACT_CORRECTIONS = 2;
 
 export type PersistStepInput = {
   type: "thought" | "tool_call" | "tool_result" | "artifact" | "final_answer";
@@ -55,21 +56,29 @@ function latestUserRequest(history: ChatMessage[]) {
 function routeTask(history: ChatMessage[]): TaskRoute {
   const request = latestUserRequest(history);
   const compact = request.replace(/\s+/g, " ").trim();
-  const wantsArtifact =
+  const rejectsArtifact =
+    /\b(?:do not|don['’]?t|without|no need (?:for|to create)|not)\b.{0,35}\b(?:pdf|report|artifact|file|document)\b/i.test(compact) ||
+    /\b(?:pdf|report|artifact|file|document)\b.{0,25}\b(?:isn['’]?t needed|is not needed|unnecessary|not required)\b/i.test(compact);
+  const requestsArtifact =
     /\bpdf\b/i.test(compact) ||
     /\b(?:create|generate|make|write|prepare|produce|export|save|share|download|give me|i need|i want)\b.{0,60}\b(?:report|brief|memo|document|write[- ]?up|file|artifact)\b/i.test(compact) ||
     /\b(?:report|brief|memo|document|write[- ]?up)\b.{0,40}\b(?:save|share|download|export)\b/i.test(compact);
+  const wantsArtifact = requestsArtifact && !rejectsArtifact;
   const explicitResearch =
     /\b(?:deep[- ]?research|research|investigat(?:e|ion)|deep dive|systematic review|literature review|survey the evidence)\b/i.test(compact) ||
     /\b(?:multiple angles|primary sources?|independent sources?|reconcile disagreements?|cross[- ]?check|source[- ]?dependent)\b/i.test(compact);
   const evidenceRequest = /\b(?:cite|citation|sources?|evidence|according to|verify|fact[- ]?check)\b/i.test(compact);
   const freshLookup =
-    /\b(?:today|currently|current|latest|recent|recently|this (?:week|month|year)|news|live|up[- ]?to[- ]?date|as of)\b/i.test(compact);
+    /\b(?:today|currently|latest|recent|recently|this (?:week|month|year)|news|live|up[- ]?to[- ]?date|as of|current (?:status|state|events?|news|price|weather|version|release|law|policy|market|officeholder|data))\b/i.test(compact);
+  const depthRequest =
+    /\b(?:in[- ]depth|thorough|deep|detailed|broad) (?:analysis|overview|assessment|review|explanation|comparison)\b/i.test(compact) ||
+    /\b(?:comprehensive overview|research overview|survey|landscape|state of (?:the )?(?:field|art|market|industry|evidence))\b/i.test(compact);
   const analyticalRequest =
     /\b(?:compare|contrast|evaluate|assess|analy[sz]e|explain)\b/i.test(compact) &&
     /\b(?:causes?|effects?|impacts?|risks?|trade[- ]?offs?|solutions?|timeline|implementation|outlook|options?|stakeholders?)\b/i.test(compact);
   const requiresResearch =
     explicitResearch ||
+    (depthRequest && compact.length >= 80) ||
     (evidenceRequest && compact.length >= 80) ||
     (analyticalRequest && compact.length >= 120) ||
     (wantsArtifact && (freshLookup || evidenceRequest));
@@ -238,6 +247,8 @@ export async function runAgent(options: AgentRunOptions) {
     pageFetches: 0,
   };
   let researchCorrections = 0;
+  let artifactCorrections = 0;
+  let artifactCreated = false;
   let finalAnswer = "";
 
   for (let i = 0; i < MAX_AGENT_STEPS; i += 1) {
@@ -268,6 +279,31 @@ export async function runAgent(options: AgentRunOptions) {
         }
 
         finalAnswer = `I couldn’t complete a reliable synthesis because the minimum source checks were not met after ${MAX_RESEARCH_CORRECTIONS} corrective attempts. ${instruction}`;
+        await options.onStep({
+          type: "final_answer",
+          toolOutput: { content: finalAnswer },
+        });
+        return finalAnswer;
+      }
+
+      if (route.wantsArtifact && !artifactCreated) {
+        const instruction = "The requested PDF artifact has not been created yet. Call generate_pdf_report now with the completed content and every source URL actually used, then confirm it is ready.";
+        if (artifactCorrections < MAX_ARTIFACT_CORRECTIONS) {
+          artifactCorrections += 1;
+          await options.onStep({
+            type: "thought",
+            toolOutput: { content: instruction },
+          });
+          appendProviderContinuation(
+            options.credentials,
+            workingMessages,
+            response.rawAssistantMessage,
+            instruction,
+          );
+          continue;
+        }
+
+        finalAnswer = `I completed the content, but couldn’t create the requested PDF after ${MAX_ARTIFACT_CORRECTIONS} corrective attempts. Retry this turn to generate the artifact.`;
         await options.onStep({
           type: "final_answer",
           toolOutput: { content: finalAnswer },
@@ -328,6 +364,7 @@ export async function runAgent(options: AgentRunOptions) {
       });
 
       if (artifact) {
+        artifactCreated = true;
         await options.onStep({
           type: "artifact",
           toolName: toolCall.name,
@@ -348,7 +385,9 @@ export async function runAgent(options: AgentRunOptions) {
 
   finalAnswer = route.kind === "research" && !researchEvidenceComplete(successfulSearchQueries, successfulPageReads)
     ? `I reached the step limit before completing the required source checks. ${correctiveResearchInstruction(successfulSearchQueries, successfulPageReads)}`
-    : "I've reached my step limit. Here's what I found so far from the completed tool calls; start a follow-up message if you want me to continue.";
+    : route.wantsArtifact && !artifactCreated
+      ? "I reached the step limit before the requested PDF could be created. Retry this turn to finish the artifact."
+      : "I've reached my step limit. Here's what I found so far from the completed tool calls; start a follow-up message if you want me to continue.";
   await options.onStep({
     type: "final_answer",
     toolOutput: { content: finalAnswer },
