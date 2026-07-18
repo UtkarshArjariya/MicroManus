@@ -228,7 +228,7 @@ function ArtifactCard({ artifact }: { artifact: ReportArtifact }) {
             Link expires {formatDate(artifact.expires_at)}
           </p>
           <a
-            className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-ochre underline-offset-4 hover:underline"
+            className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-ink decoration-ochre underline-offset-4 hover:underline"
             href={artifact.signed_url}
           >
             <Download className="h-4 w-4" aria-hidden="true" />
