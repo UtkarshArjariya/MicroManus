@@ -39,7 +39,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
-STRIPE_PRICE_ID=
+STRIPE_PRICE_ID_INR=
 ENCRYPTION_KEY=
 BRAVE_SEARCH_API_KEY=
 ```
@@ -49,7 +49,7 @@ Where to get them:
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`: Supabase project settings -> API.
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`: Stripe Developers -> API keys, in test mode for review.
 - `STRIPE_WEBHOOK_SECRET`: Stripe webhook endpoint signing secret for `/api/stripe/webhook`.
-- `STRIPE_PRICE_ID`: one-time Stripe test-mode price for the 5-credit package.
+- `STRIPE_PRICE_ID_INR`: one-time ₹399 INR Stripe test-mode price for the 5-credit package.
 - `ENCRYPTION_KEY`: generate with `openssl rand -base64 32`.
 - `BRAVE_SEARCH_API_KEY`: Brave Search API dashboard.
 
@@ -81,7 +81,17 @@ supabase/migrations/20260718000000_initial_schema.sql
 supabase/migrations/20260718001000_agent_chat_schema.sql
 supabase/migrations/20260718002000_report_artifacts.sql
 supabase/migrations/20260718003000_usage_costs_and_credit_billing.sql
+supabase/migrations/20260718162000_cli_access_probe.sql
 ```
+
+Apply migrations with the project-local CLI rather than pasting SQL into the Dashboard:
+
+```bash
+pnpm supabase link --project-ref <project-ref>
+pnpm supabase db push
+```
+
+Keep the Supabase personal access token and any database password in session environment variables or ignored local files only.
 
 Core tables:
 
@@ -89,6 +99,7 @@ Core tables:
 - Prompt 2: `provider_keys`, `chats`, `messages`, `agent_steps`, `usage_events`.
 - Prompt 3: `report_artifacts`, private Storage bucket `report-artifacts`, `agent_steps.type = artifact`.
 - Prompt 4: usage cost columns on `usage_events` and unique `credit_ledger_agent_turn_reference_unique`.
+- Operations: `20260718162000_cli_access_probe.sql` records verified CLI migration access without changing application schema.
 
 RLS:
 
@@ -99,18 +110,22 @@ RLS:
 
 ## Stripe Testing
 
-- Test card: `4242 4242 4242 4242`
+- India test Visa: `4000 0035 6000 0008`
 - Expiry: any future date
 - CVC: any 3 digits
 - ZIP/postal code: any value
 
+The connected Stripe account is India-registered, so international-issued test cards such as `4242 4242 4242 4242` are correctly blocked; use the India-specific card above to test Checkout successfully.
+
 Checkout success returns to `/paywall?stripe=success`, then polls `/api/wallet` until the signed webhook grants credits. Checkout cancellation returns to `/paywall?stripe=cancelled` with no payment state and no credits.
+
+Indian Stripe accounts cannot create USD Checkout Sessions without cross-border export approval. MicroManus therefore prices the unlock at ₹399, a domestic-currency equivalent of the original $5 package; domestic INR pay-to-unlock and its five-credit grant are unchanged, while international cards still require the account’s export approval.
 
 ## Five-Minute Reviewer Walkthrough
 
 1. Open https://micromanus-drdroid.vercel.app/login in a fresh browser session.
 2. Sign in with Google or GitHub.
-3. On `/paywall`, redeem coupon `SID_DRDROID` to get 5 credits. For the card path, use Stripe test card `4242 4242 4242 4242`.
+3. On `/paywall`, redeem coupon `SID_DRDROID` to get 5 credits. For the card path, use Stripe's India test Visa `4000 0035 6000 0008`.
 4. Open Settings, add an OpenAI, Anthropic, Kimi, or compatible API key, then use Test connection.
 5. Create a new chat with the saved key and model.
 6. Ask for a current California wildfires report with sources and a PDF.
