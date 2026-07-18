@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import { getDefaultBaseUrl, type ProviderId } from "@/lib/models";
+import { jsonInternalError, logServerError } from "@/lib/server-errors";
 
 const PROVIDERS = new Set<ProviderId>(["openai", "anthropic", "kimi", "openai_compatible"]);
 const TEST_TIMEOUT_MS = 15_000;
@@ -71,46 +72,56 @@ function testErrorForStatus(status: number) {
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return jsonError("Unauthorized", 401);
-  }
-
-  const body = (await request.json().catch(() => null)) as {
-    provider?: ProviderId;
-    apiKey?: string;
-    baseUrl?: string;
-  } | null;
-
-  const provider = body?.provider;
-  const apiKey = body?.apiKey?.trim();
-  const baseUrl = body?.baseUrl?.trim() || (provider ? getDefaultBaseUrl(provider) : "");
-
-  if (!provider || !PROVIDERS.has(provider)) {
-    return jsonError("Invalid provider.");
-  }
-
-  if (!apiKey) {
-    return jsonError("Missing API key.");
-  }
-
-  if (provider === "openai_compatible" && !baseUrl) {
-    return jsonError("Base URL is required for custom OpenAI-compatible providers.");
-  }
+  let userId: string | undefined;
+  let provider: ProviderId | undefined;
 
   try {
-    if (provider === "anthropic") {
-      await testAnthropic(apiKey);
-    } else {
-      await testOpenAiCompatible(apiKey, baseUrl);
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return jsonError("Unauthorized", 401);
+    }
+
+    userId = user.id;
+    const body = (await request.json().catch(() => null)) as {
+      provider?: ProviderId;
+      apiKey?: string;
+      baseUrl?: string;
+    } | null;
+
+    provider = body?.provider;
+    const apiKey = body?.apiKey?.trim();
+    const baseUrl = body?.baseUrl?.trim() || (provider ? getDefaultBaseUrl(provider) : "");
+
+    if (!provider || !PROVIDERS.has(provider)) {
+      return jsonError("Invalid provider.");
+    }
+
+    if (!apiKey) {
+      return jsonError("Missing API key.");
+    }
+
+    if (provider === "openai_compatible" && !baseUrl) {
+      return jsonError("Base URL is required for custom OpenAI-compatible providers.");
+    }
+
+    try {
+      if (provider === "anthropic") {
+        await testAnthropic(apiKey);
+      } else {
+        await testOpenAiCompatible(apiKey, baseUrl);
+      }
+    } catch (error) {
+      logServerError("api/provider-keys/test.provider", error, { userId, provider });
+      return jsonError(error instanceof Error ? error.message : "Connection test failed.", 502);
     }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Connection test failed.", 502);
+    logServerError("api/provider-keys/test", error, { userId, provider });
+    return jsonInternalError("Connection test failed.");
   }
 }
