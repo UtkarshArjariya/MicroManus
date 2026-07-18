@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { runAgent, type PersistStepInput } from "@/lib/agent";
 import type { ChatMessage } from "@/lib/agent/providers";
+import { calculateUsageCost } from "@/lib/cost";
 import { decrypt } from "@/lib/crypto";
 import type { ProviderId } from "@/lib/models";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -16,6 +17,13 @@ function sse(event: string, data: unknown) {
 function titleFrom(content: string) {
   const compact = content.replace(/\s+/g, " ").trim();
   return compact.length > 80 ? `${compact.slice(0, 77)}...` : compact || "New chat";
+}
+
+function paywallResponse() {
+  return NextResponse.json(
+    { error: "You need credits to send a message.", redirectTo: "/paywall" },
+    { status: 402 },
+  );
 }
 
 async function appendMessage(chatId: string, role: MessageRole, content: string) {
@@ -100,6 +108,20 @@ export async function POST(
     return NextResponse.json({ error: "Provider key not found." }, { status: 404 });
   }
 
+  const { data: wallet, error: walletError } = await admin
+    .from("credit_wallets")
+    .select("balance")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (walletError) {
+    return NextResponse.json({ error: "Could not check credit balance." }, { status: 500 });
+  }
+
+  if ((wallet?.balance ?? 0) <= 0) {
+    return paywallResponse();
+  }
+
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -159,12 +181,24 @@ export async function POST(
             baseUrl: providerKey.base_url,
             model: chat.model,
           },
+          chatId,
+          messageId: assistantMessage.id,
           history: (persistedMessages ?? []).map((message) => ({
             role: message.role as ChatMessage["role"],
             content: message.content,
           })),
           onStep: persistStep,
+          onArtifact: async (artifact) => {
+            send("artifact", artifact);
+          },
           onUsage: async (usage) => {
+            const cost = calculateUsageCost({
+              provider: usage.provider,
+              model: usage.model,
+              input_tokens: usage.inputTokens,
+              output_tokens: usage.outputTokens,
+              cached_input_tokens: usage.cachedInputTokens,
+            });
             const { error } = await admin.from("usage_events").insert({
               chat_id: chatId,
               message_id: assistantMessage.id,
@@ -173,6 +207,10 @@ export async function POST(
               input_tokens: usage.inputTokens,
               output_tokens: usage.outputTokens,
               cached_input_tokens: usage.cachedInputTokens,
+              input_cost_usd: cost.input_cost_usd,
+              output_cost_usd: cost.output_cost_usd,
+              cached_cost_usd: cost.cached_cost_usd,
+              total_cost_usd: cost.total_cost_usd,
             });
 
             if (error) {
@@ -180,6 +218,21 @@ export async function POST(
             }
           },
         });
+
+        const { data: debitRows, error: debitError } = await admin.rpc("apply_credit", {
+          p_user_id: user.id,
+          p_delta: -1,
+          p_reason: "agent_turn_debit",
+          p_reference_id: assistantMessage.id,
+        });
+
+        if (debitError) {
+          throw new Error(debitError.message);
+        }
+
+        const newBalance = Array.isArray(debitRows)
+          ? (debitRows[0] as { wallet_balance?: number } | undefined)?.wallet_balance
+          : undefined;
 
         await admin
           .from("messages")
@@ -189,6 +242,10 @@ export async function POST(
 
         for (const chunk of finalAnswer.match(/.{1,24}(\s|$)/g) ?? [finalAnswer]) {
           send("content", { messageId: assistantMessage.id, chunk });
+        }
+
+        if (typeof newBalance === "number") {
+          send("credit", { balance: newBalance });
         }
 
         send("done", { messageId: assistantMessage.id });
