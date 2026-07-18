@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ProviderId } from "@/lib/models";
 import { anthropicTools, openAiTools } from "@/lib/agent/tools";
+import { logServerError } from "@/lib/server-errors";
 
 const PROVIDER_TIMEOUT_MS = 60_000;
 
@@ -118,6 +119,14 @@ function providerDisplayName(provider: ProviderId) {
   return "OpenAI";
 }
 
+function endpointOrigin(input: string) {
+  try {
+    return new URL(input).origin;
+  } catch {
+    return "invalid-url";
+  }
+}
+
 function friendlyProviderError(provider: ProviderId, status: number) {
   const name = providerDisplayName(provider);
 
@@ -150,6 +159,11 @@ async function providerFetch(provider: ProviderId, input: string, init: RequestI
       signal: controller.signal,
     });
   } catch (error) {
+    logServerError("agent/provider.fetch", error, {
+      provider,
+      endpoint: endpointOrigin(input),
+    });
+
     if (error instanceof Error && error.name === "AbortError") {
       throw new ProviderRequestError(friendlyProviderError(provider, 504), 504);
     }
@@ -157,6 +171,18 @@ async function providerFetch(provider: ProviderId, input: string, init: RequestI
     throw new ProviderRequestError(`${providerDisplayName(provider)} could not be reached. Check the provider status and try again.`);
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function parseProviderJson<T>(response: Response, provider: ProviderId): Promise<T> {
+  try {
+    return (await response.json()) as T;
+  } catch (error) {
+    logServerError("agent/provider.parse", error, {
+      provider,
+      status: response.status,
+    });
+    throw new ProviderRequestError(`${providerDisplayName(provider)} returned an invalid response. Retry in a moment.`, 502);
   }
 }
 
@@ -245,7 +271,16 @@ async function callOpenAiCompatible(
     }),
   });
 
-  const payload = (await response.json().catch(() => null)) as {
+  if (!response.ok) {
+    const error = new Error(`Provider returned HTTP ${response.status}.`);
+    logServerError("agent/provider.response", error, {
+      provider: credentials.provider,
+      status: response.status,
+    });
+    throw new ProviderRequestError(friendlyProviderError(credentials.provider, response.status), response.status);
+  }
+
+  const payload = await parseProviderJson<{
     error?: { message?: string };
     choices?: Array<{
       message?: OpenAiMessage;
@@ -258,11 +293,7 @@ async function callOpenAiCompatible(
         cached_tokens?: number;
       };
     };
-  } | null;
-
-  if (!response.ok) {
-    throw new ProviderRequestError(friendlyProviderError(credentials.provider, response.status), response.status);
-  }
+  }>(response, credentials.provider);
 
   const assistant = payload?.choices?.[0]?.message ?? { role: "assistant", content: "" };
   const toolCalls = (assistant.tool_calls ?? []).map((toolCall) => ({
@@ -339,7 +370,16 @@ async function callAnthropic(
     }),
   });
 
-  const payload = (await response.json().catch(() => null)) as {
+  if (!response.ok) {
+    const error = new Error(`Provider returned HTTP ${response.status}.`);
+    logServerError("agent/provider.response", error, {
+      provider: credentials.provider,
+      status: response.status,
+    });
+    throw new ProviderRequestError(friendlyProviderError(credentials.provider, response.status), response.status);
+  }
+
+  const payload = await parseProviderJson<{
     error?: { message?: string };
     content?: AnthropicContentBlock[];
     usage?: {
@@ -348,11 +388,7 @@ async function callAnthropic(
       cache_read_input_tokens?: number;
       cache_creation_input_tokens?: number;
     };
-  } | null;
-
-  if (!response.ok) {
-    throw new ProviderRequestError(friendlyProviderError(credentials.provider, response.status), response.status);
-  }
+  }>(response, credentials.provider);
 
   const content = payload?.content ?? [];
   const text = content
