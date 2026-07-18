@@ -22,7 +22,7 @@ export async function AppShell({ selectedChatId }: { selectedChatId: string | nu
     supabase.from("credit_wallets").select("balance").eq("user_id", user.id).maybeSingle(),
     supabase
       .from("provider_keys")
-      .select("id, provider, label, base_url, key_last4, default_model")
+      .select("id, provider, api_format, label, base_url, key_last4, default_model")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     supabase
