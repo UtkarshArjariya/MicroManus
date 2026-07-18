@@ -12,6 +12,7 @@ Production signup URL: https://micromanus-drdroid.vercel.app/login
 - Stripe Checkout test payment grants 5 credits through an idempotent signed webhook.
 - Bring-your-own-key provider settings with built-in endpoints for OpenAI, Anthropic/Claude, Google Gemini, and Kimi.
 - Custom provider endpoints can use OpenAI Chat Completions, Anthropic Messages, or Google Gemini `generateContent` compatibility.
+- Provider and new-chat model pickers can load the complete model catalog available to the supplied key; manual model IDs remain supported for private or newly released models.
 - Encrypted BYOK storage. Keys are decrypted only in server code immediately before provider calls.
 - Chat threads with a multi-step agent loop using `web_search`, `fetch_page`, and `generate_pdf_report`.
 - Prompt caching hooks and cached-token extraction for OpenAI/Kimi/Anthropic-compatible usage payloads.
