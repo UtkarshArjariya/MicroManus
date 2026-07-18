@@ -180,6 +180,7 @@ export async function POST(
             apiKey: decrypt(providerKey.encrypted_key),
             baseUrl: providerKey.base_url,
             model: chat.model,
+            promptCacheKey: chatId,
           },
           chatId,
           messageId: assistantMessage.id,
