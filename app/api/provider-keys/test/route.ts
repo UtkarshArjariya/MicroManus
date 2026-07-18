@@ -68,7 +68,7 @@ function testErrorForStatus(status: number) {
     return "Provider is temporarily unavailable.";
   }
 
-  return `Connection test failed with HTTP ${status}.`;
+  return "The provider rejected the connection test. Check the key, model, and base URL.";
 }
 
 export async function POST(request: Request) {
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return jsonError("Unauthorized", 401);
+      return jsonError("Your session ended. Sign in again, then retry the connection.", 401);
     }
 
     userId = user.id;
@@ -97,11 +97,11 @@ export async function POST(request: Request) {
     const baseUrl = body?.baseUrl?.trim() || (provider ? getDefaultBaseUrl(provider) : "");
 
     if (!provider || !PROVIDERS.has(provider)) {
-      return jsonError("Invalid provider.");
+      return jsonError("Choose a supported provider, then retry the connection.");
     }
 
     if (!apiKey) {
-      return jsonError("Missing API key.");
+      return jsonError("Enter an API key before testing the connection.");
     }
 
     if (provider === "openai_compatible" && !baseUrl) {
