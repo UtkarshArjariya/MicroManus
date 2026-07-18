@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { decrypt } from "@/lib/crypto";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getDefaultBaseUrl,
   getProviderApiFormat,
@@ -23,6 +25,27 @@ async function testOpenAiCompatible(apiKey: string, baseUrl: string) {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
     },
+  });
+
+  if (!response.ok) {
+    throw new Error(testErrorForStatus(response.status));
+  }
+}
+
+async function testOpenAiResponses(apiKey: string, baseUrl: string, model: string) {
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, "")}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: "Reply only with OK.",
+      max_output_tokens: 16,
+      store: false,
+      include: ["reasoning.encrypted_content"],
+    }),
   });
 
   if (!response.ok) {
@@ -115,12 +138,43 @@ export async function POST(request: Request) {
       baseUrl?: string;
       apiFormat?: ProviderApiFormat;
       model?: string;
+      providerKeyId?: string;
     } | null;
 
     provider = body?.provider;
-    const apiKey = body?.apiKey?.trim();
-    const baseUrl = body?.baseUrl?.trim() || (provider ? getDefaultBaseUrl(provider) : "");
-    const model = body?.model?.trim();
+    let apiKey = body?.apiKey?.trim() ?? "";
+    let baseUrl = body?.baseUrl?.trim() || (provider ? getDefaultBaseUrl(provider) : "");
+    let model = body?.model?.trim() ?? "";
+    let apiFormat = provider === "openai_compatible"
+      ? body?.apiFormat
+      : provider === "openai" && (body?.apiFormat === "openai" || body?.apiFormat === "openai_responses")
+        ? body.apiFormat
+        : provider
+          ? getProviderApiFormat(provider)
+        : undefined;
+
+    if (!apiKey && body?.providerKeyId) {
+      const admin = createAdminClient();
+      const { data: savedKey, error: savedKeyError } = await admin
+        .from("provider_keys")
+        .select("provider, api_format, base_url, encrypted_key, default_model")
+        .eq("id", body.providerKeyId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (savedKeyError || !savedKey) {
+        if (savedKeyError) {
+          logServerError("api/provider-keys/test.saved-key", savedKeyError, { userId, providerKeyId: body.providerKeyId });
+        }
+        return jsonError("Saved provider key not found.", 404);
+      }
+
+      provider = savedKey.provider as ProviderId;
+      apiKey = decrypt(savedKey.encrypted_key);
+      apiFormat = savedKey.api_format as ProviderApiFormat;
+      baseUrl = savedKey.base_url || getDefaultBaseUrl(provider);
+      model = body?.model?.trim() || savedKey.default_model;
+    }
 
     if (!provider || !PROVIDERS.has(provider)) {
       return jsonError("Choose a supported provider, then retry the connection.");
@@ -134,9 +188,6 @@ export async function POST(request: Request) {
       return jsonError("Base URL is required for custom endpoints.");
     }
 
-    const apiFormat = provider === "openai_compatible"
-      ? body?.apiFormat
-      : getProviderApiFormat(provider);
     if (!apiFormat || !isProviderApiFormat(apiFormat)) {
       return jsonError("Choose how the custom endpoint is API-compatible.");
     }
@@ -145,11 +196,17 @@ export async function POST(request: Request) {
       return jsonError("Enter a Google model ID before testing the connection.");
     }
 
+    if (apiFormat === "openai_responses" && !model) {
+      return jsonError("Enter a Responses API model ID before testing the connection.");
+    }
+
     try {
       if (apiFormat === "anthropic") {
         await testAnthropic(apiKey, baseUrl);
       } else if (apiFormat === "google") {
         await testGoogle(apiKey, baseUrl, model!);
+      } else if (apiFormat === "openai_responses") {
+        await testOpenAiResponses(apiKey, baseUrl, model!);
       } else {
         await testOpenAiCompatible(apiKey, baseUrl);
       }
