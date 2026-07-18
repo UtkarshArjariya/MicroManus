@@ -1,6 +1,6 @@
 # MicroManus
 
-MicroManus is a usage-based deep-research AI agent web app. This build includes the deployable Next.js 15 skeleton, Supabase OAuth auth, a credit wallet, coupon unlock, Stripe Checkout unlock, encrypted bring-your-own-key provider settings, chat threads, and a web-search-capable research agent loop.
+MicroManus is a usage-based deep-research AI agent web app. This build includes the deployable Next.js 15 skeleton, Supabase OAuth auth, a credit wallet, coupon unlock, Stripe Checkout unlock, encrypted bring-your-own-key provider settings, chat threads, a web-search-capable research agent loop, and private downloadable PDF report artifacts.
 
 The platform never stores a platform-owned LLM provider key. User BYOK keys are encrypted with `ENCRYPTION_KEY` and are decrypted only inside server routes immediately before provider calls.
 
@@ -8,7 +8,7 @@ The platform never stores a platform-owned LLM provider key. User BYOK keys are 
 
 - Next.js 15 App Router, TypeScript, Tailwind CSS
 - shadcn/ui-style local components
-- Supabase Auth, Postgres, RLS, Storage-ready project structure
+- Supabase Auth, Postgres, RLS, private Storage report artifacts
 - Stripe Checkout one-time payments
 - pnpm
 - Vercel deployment
@@ -63,9 +63,10 @@ For production, `NEXT_PUBLIC_SITE_URL` must be your real `https://*.vercel.app` 
 11. Generate `ENCRYPTION_KEY` for BYOK storage:
     - `openssl rand -base64 32`
 12. Create a Brave Search API key and set `BRAVE_SEARCH_API_KEY`. This is the platform-level web search tool secret.
-13. Run both migrations in order:
+13. Run migrations in order:
     - `supabase/migrations/20260718000000_initial_schema.sql`
     - `supabase/migrations/20260718001000_agent_chat_schema.sql`
+    - `supabase/migrations/20260718002000_report_artifacts.sql`
 14. Add all env vars to `.env.local` and to Vercel Project Settings > Environment Variables.
 15. Install and run locally:
     - `pnpm install`
@@ -121,6 +122,17 @@ Agent/chat tables:
 - `messages`: ordered chat messages with strict `seq` ordering.
 - `agent_steps`: persisted public trace entries for rationale, tool calls, tool observations, and final answer markers.
 - `usage_events`: raw provider-reported input/output/cached-token usage for each LLM call.
+- `report_artifacts`: private PDF report metadata linked to the assistant message that produced it. The table stores only the Supabase Storage path; signed download URLs are generated server-side when chats load or when a report is produced.
+
+Storage:
+
+- `report-artifacts`: private Supabase Storage bucket for generated PDF files. No public bucket access is used.
+
+Agent tools:
+
+- `web_search`: searches the web through Brave Search.
+- `fetch_page`: fetches and extracts readable text from a URL.
+- `generate_pdf_report`: renders a professional PDF with title, generated-on date, table of contents for multi-section reports, headed sections, and a deduplicated sources list constrained to URLs seen through search/fetch tools.
 
 ## File Layout
 
@@ -140,6 +152,7 @@ app/
 components/ui/
 lib/
   agent/
+  report-artifacts.ts
   credits.ts
   crypto.ts
   env.ts
