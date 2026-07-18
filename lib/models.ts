@@ -182,8 +182,22 @@ export const MODEL_PRICING: ModelPricing[] = [
   },
 ];
 
+const FALLBACK_MODEL_RELEASE_ORDER: Partial<Record<ProviderId, string[]>> = {
+  openai: ["gpt-5.6-terra", "gpt-5.5", "gpt-5.4-mini", "gpt-4.1-mini", "gpt-4.1"],
+  anthropic: ["claude-sonnet-5", "claude-opus-4-8", "claude-haiku-4-5-20251001", "claude-sonnet-4-20250514"],
+  google: ["gemini-2.5-pro", "gemini-2.5-flash"],
+  kimi: ["kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5"],
+};
+
 export function getModelsForProvider(provider: ProviderId) {
-  return MODEL_PRICING.filter((model) => model.provider === provider);
+  const releaseOrder = FALLBACK_MODEL_RELEASE_ORDER[provider] ?? [];
+  const releaseRank = new Map(releaseOrder.map((modelId, index) => [modelId, index]));
+  return MODEL_PRICING
+    .filter((model) => model.provider === provider)
+    .sort((left, right) =>
+      (releaseRank.get(left.modelId) ?? Number.MAX_SAFE_INTEGER)
+      - (releaseRank.get(right.modelId) ?? Number.MAX_SAFE_INTEGER),
+    );
 }
 
 export function getDefaultModel(provider: ProviderId) {
