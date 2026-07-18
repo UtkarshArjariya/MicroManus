@@ -20,6 +20,7 @@ export type UsageNumbers = {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  cachedWriteTokens: number;
 };
 
 export type ToolCall = {
@@ -27,6 +28,8 @@ export type ToolCall = {
   name: string;
   input: Record<string, unknown>;
 };
+
+export type ProviderToolName = "web_search" | "fetch_page" | "generate_pdf_report";
 
 export type ProviderResponse = {
   content: string;
@@ -66,6 +69,18 @@ type OpenAiMessage = {
       arguments: string;
     };
   }>;
+};
+
+type OpenAiResponsesItem = Record<string, unknown> & {
+  type?: string;
+};
+
+type OpenAiResponsesFunctionCall = OpenAiResponsesItem & {
+  type: "function_call";
+  id?: string;
+  call_id?: string;
+  name?: string;
+  arguments?: string;
 };
 
 type AnthropicContentBlock =
@@ -206,18 +221,23 @@ export async function callProvider(
   credentials: ProviderCredentials,
   messages: ChatMessage[],
   workingMessages: unknown[],
+  toolNames: ProviderToolName[],
 ) {
   const apiFormat = providerApiFormat(credentials);
 
   if (apiFormat === "anthropic") {
-    return callAnthropic(credentials, messages, workingMessages as AnthropicMessage[]);
+    return callAnthropic(credentials, messages, workingMessages as AnthropicMessage[], toolNames);
   }
 
   if (apiFormat === "google") {
-    return callGoogle(credentials, messages, workingMessages as GoogleContent[]);
+    return callGoogle(credentials, messages, workingMessages as GoogleContent[], toolNames);
   }
 
-  return callOpenAiCompatible(credentials, messages, workingMessages as OpenAiMessage[]);
+  if (apiFormat === "openai_responses") {
+    return callOpenAiResponses(credentials, workingMessages as OpenAiResponsesItem[], toolNames);
+  }
+
+  return callOpenAiCompatible(credentials, messages, workingMessages as OpenAiMessage[], toolNames);
 }
 
 export function initialWorkingMessages(credentials: ProviderCredentials, messages: ChatMessage[]) {
@@ -229,6 +249,15 @@ export function initialWorkingMessages(credentials: ProviderCredentials, message
 
   if (apiFormat === "google") {
     return toGoogleContents(messages);
+  }
+
+  if (apiFormat === "openai_responses") {
+    return messages
+      .filter((message) => message.role !== "tool")
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      })) satisfies OpenAiResponsesItem[];
   }
 
   return messages.map((message) => ({
@@ -280,26 +309,106 @@ export function appendToolResults(
     return;
   }
 
+  if (apiFormat === "openai_responses") {
+    const responseItems = workingMessages as OpenAiResponsesItem[];
+    if (Array.isArray(assistantMessage)) {
+      responseItems.push(...(assistantMessage as OpenAiResponsesItem[]));
+    }
+    results.forEach(({ toolCall, output }) => {
+      responseItems.push({
+        type: "function_call_output",
+        call_id: toolCall.id,
+        output: serializeToolOutput(output),
+      });
+    });
+    return;
+  }
+
   const openAiMessages = workingMessages as OpenAiMessage[];
   openAiMessages.push(assistantMessage as OpenAiMessage);
   results.forEach(({ toolCall, output }) => {
     openAiMessages.push({
       role: "tool",
       tool_call_id: toolCall.id,
-      content: JSON.stringify(output).slice(0, 16_000),
+      content: serializeToolOutput(output),
     });
   });
+}
+
+export function appendProviderContinuation(
+  credentials: ProviderCredentials,
+  workingMessages: unknown[],
+  assistantMessage: unknown,
+  instruction: string,
+) {
+  const apiFormat = providerApiFormat(credentials);
+
+  if (apiFormat === "anthropic") {
+    const messages = workingMessages as AnthropicMessage[];
+    messages.push({
+      role: "assistant",
+      content: Array.isArray(assistantMessage) ? (assistantMessage as AnthropicContentBlock[]) : [],
+    });
+    messages.push({ role: "user", content: instruction });
+    return;
+  }
+
+  if (apiFormat === "google") {
+    const contents = workingMessages as GoogleContent[];
+    const assistantContent = assistantMessage as GoogleContent;
+    if (assistantContent?.parts?.length) {
+      contents.push(assistantContent);
+    }
+    contents.push({ role: "user", parts: [{ text: instruction }] });
+    return;
+  }
+
+  if (apiFormat === "openai_responses") {
+    const items = workingMessages as OpenAiResponsesItem[];
+    if (Array.isArray(assistantMessage)) {
+      items.push(...(assistantMessage as OpenAiResponsesItem[]));
+    }
+    items.push({ role: "user", content: instruction });
+    return;
+  }
+
+  const messages = workingMessages as OpenAiMessage[];
+  messages.push(assistantMessage as OpenAiMessage);
+  messages.push({ role: "user", content: instruction });
+}
+
+function serializeToolOutput(output: unknown) {
+  const value = JSON.stringify(output);
+  return (typeof value === "string" ? value : String(output)).slice(0, 16_000);
+}
+
+function selectedOpenAiTools(toolNames: ProviderToolName[]) {
+  const enabled = new Set<string>(toolNames);
+  return openAiTools.filter((tool) => enabled.has(tool.function.name));
+}
+
+function responsesTools(toolNames: ProviderToolName[]) {
+  return selectedOpenAiTools(toolNames).map((tool) => ({
+    type: "function" as const,
+    name: tool.function.name,
+    description: tool.function.description,
+    parameters: tool.function.parameters,
+    strict: true,
+  }));
 }
 
 async function callOpenAiCompatible(
   credentials: ProviderCredentials,
   _messages: ChatMessage[],
   workingMessages: OpenAiMessage[],
+  toolNames: ProviderToolName[],
 ): Promise<ProviderResponse> {
   const baseUrl = providerBaseUrl(credentials).replace(/\/$/, "");
   if (!baseUrl) {
     throw new Error("Missing OpenAI-compatible base URL.");
   }
+
+  const tools = selectedOpenAiTools(toolNames);
 
   const response = await providerFetch(credentials.provider, `${baseUrl}/chat/completions`, {
     method: "POST",
@@ -310,8 +419,7 @@ async function callOpenAiCompatible(
     body: JSON.stringify({
       model: credentials.model,
       messages: workingMessages,
-      tools: openAiTools,
-      tool_choice: "auto",
+      ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
       ...(credentials.provider === "kimi" && credentials.promptCacheKey
         ? { prompt_cache_key: credentials.promptCacheKey }
         : {}),
@@ -338,6 +446,7 @@ async function callOpenAiCompatible(
       cached_tokens?: number;
       prompt_tokens_details?: {
         cached_tokens?: number;
+        cache_write_tokens?: number;
       };
     };
   }>(response, credentials.provider);
@@ -360,6 +469,116 @@ async function callOpenAiCompatible(
         payload?.usage?.prompt_tokens_details?.cached_tokens ??
         payload?.usage?.cached_tokens ??
         0,
+      cachedWriteTokens: payload?.usage?.prompt_tokens_details?.cache_write_tokens ?? 0,
+    },
+  };
+}
+
+function responseItemText(item: OpenAiResponsesItem) {
+  if (item.type === "output_text" && typeof item.text === "string") {
+    return item.text;
+  }
+
+  if (item.type !== "message" || !Array.isArray(item.content)) {
+    return "";
+  }
+
+  return item.content
+    .filter(
+      (part): part is { type: "output_text"; text: string } =>
+        Boolean(part) &&
+        typeof part === "object" &&
+        (part as { type?: unknown }).type === "output_text" &&
+        typeof (part as { text?: unknown }).text === "string",
+    )
+    .map((part) => part.text)
+    .join("\n");
+}
+
+async function callOpenAiResponses(
+  credentials: ProviderCredentials,
+  workingItems: OpenAiResponsesItem[],
+  toolNames: ProviderToolName[],
+): Promise<ProviderResponse> {
+  const baseUrl = providerBaseUrl(credentials).replace(/\/$/, "");
+  if (!baseUrl) {
+    throw new Error("Missing OpenAI Responses-compatible base URL.");
+  }
+
+  const tools = responsesTools(toolNames);
+  const response = await providerFetch(credentials.provider, `${baseUrl}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${credentials.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: credentials.model,
+      input: workingItems,
+      store: false,
+      include: ["reasoning.encrypted_content"],
+      ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
+      ...(credentials.promptCacheKey ? { prompt_cache_key: credentials.promptCacheKey } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const error = new Error(`Provider returned HTTP ${response.status}.`);
+    logServerError("agent/provider.response", error, {
+      provider: credentials.provider,
+      status: response.status,
+      apiFormat: "openai_responses",
+    });
+    throw new ProviderRequestError(friendlyProviderError(credentials.provider, response.status), response.status);
+  }
+
+  const payload = await parseProviderJson<{
+    error?: { message?: string } | null;
+    output_text?: string;
+    output?: OpenAiResponsesItem[];
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      input_tokens_details?: {
+        cached_tokens?: number;
+        cache_write_tokens?: number;
+      };
+    };
+  }>(response, credentials.provider);
+
+  if (payload.error?.message) {
+    logServerError("agent/provider.response", new Error(payload.error.message), {
+      provider: credentials.provider,
+      apiFormat: "openai_responses",
+    });
+    throw new ProviderRequestError(
+      `${providerDisplayName(credentials.provider)} could not complete the request. Check the key, model, and provider settings.`,
+      502,
+    );
+  }
+
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  const nestedText = output.map(responseItemText).filter(Boolean).join("\n");
+  const toolCalls = output
+    .filter((item): item is OpenAiResponsesFunctionCall => item.type === "function_call")
+    .map((item, index) => ({
+      id: item.call_id || item.id || `response-tool-${index + 1}`,
+      name: item.name ?? "",
+      input: parseToolArguments(item.arguments),
+    }))
+    .filter((toolCall) => Boolean(toolCall.name));
+
+  return {
+    content: payload.output_text?.trim() || nestedText,
+    toolCalls,
+    // Replaying the complete output preserves encrypted reasoning items when
+    // store:false is used and keeps Responses function calls paired by call_id.
+    rawAssistantMessage: output,
+    usage: {
+      inputTokens: payload.usage?.input_tokens ?? 0,
+      outputTokens: payload.usage?.output_tokens ?? 0,
+      cachedInputTokens: payload.usage?.input_tokens_details?.cached_tokens ?? 0,
+      cachedWriteTokens: payload.usage?.input_tokens_details?.cache_write_tokens ?? 0,
     },
   };
 }
@@ -381,6 +600,7 @@ async function callAnthropic(
   credentials: ProviderCredentials,
   messages: ChatMessage[],
   workingMessages: AnthropicMessage[],
+  toolNames: ProviderToolName[],
 ): Promise<ProviderResponse> {
   const baseUrl = providerBaseUrl(credentials).replace(/\/$/, "");
   if (!baseUrl) {
@@ -399,9 +619,11 @@ async function callAnthropic(
       ...(useAnthropicCaching ? { cache_control: { type: "ephemeral" } as const } : {}),
     },
   ];
-  const cachedTools: AnthropicTool[] = anthropicTools.map((tool, index) => ({
+  const enabledTools = new Set<string>(toolNames);
+  const selectedTools = anthropicTools.filter((tool) => enabledTools.has(tool.name));
+  const cachedTools: AnthropicTool[] = selectedTools.map((tool, index) => ({
     ...tool,
-    ...(useAnthropicCaching && index === anthropicTools.length - 1
+    ...(useAnthropicCaching && index === selectedTools.length - 1
       ? { cache_control: { type: "ephemeral" } as const }
       : {}),
   }));
@@ -418,7 +640,7 @@ async function callAnthropic(
       max_tokens: 4096,
       system: cachedSystem,
       messages: workingMessages,
-      tools: cachedTools,
+      ...(cachedTools.length > 0 ? { tools: cachedTools } : {}),
     }),
   });
 
@@ -469,6 +691,7 @@ async function callAnthropic(
         (payload?.usage?.cache_read_input_tokens ?? 0),
       outputTokens: payload?.usage?.output_tokens ?? 0,
       cachedInputTokens: payload?.usage?.cache_read_input_tokens ?? 0,
+      cachedWriteTokens: payload?.usage?.cache_creation_input_tokens ?? 0,
     },
   };
 }
@@ -498,8 +721,8 @@ function googleSchema(value: unknown): unknown {
   return value;
 }
 
-function googleFunctionDeclarations() {
-  return openAiTools.map((tool) => ({
+function googleFunctionDeclarations(toolNames: ProviderToolName[]) {
+  return selectedOpenAiTools(toolNames).map((tool) => ({
     name: tool.function.name,
     description: tool.function.description,
     parameters: googleSchema(tool.function.parameters),
@@ -525,6 +748,7 @@ async function callGoogle(
   credentials: ProviderCredentials,
   messages: ChatMessage[],
   workingContents: GoogleContent[],
+  toolNames: ProviderToolName[],
 ): Promise<ProviderResponse> {
   const baseUrl = providerBaseUrl(credentials).replace(/\/$/, "");
   if (!baseUrl) {
@@ -536,6 +760,7 @@ async function callGoogle(
     .filter((message) => message.role === "system")
     .map((message) => message.content)
     .join("\n\n");
+  const functionDeclarations = googleFunctionDeclarations(toolNames);
   const response = await providerFetch(
     credentials.provider,
     `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`,
@@ -548,8 +773,12 @@ async function callGoogle(
       body: JSON.stringify({
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
         contents: workingContents,
-        tools: [{ functionDeclarations: googleFunctionDeclarations() }],
-        toolConfig: { functionCallingConfig: { mode: "AUTO" } },
+        ...(functionDeclarations.length > 0
+          ? {
+              tools: [{ functionDeclarations }],
+              toolConfig: { functionCallingConfig: { mode: "AUTO" } },
+            }
+          : {}),
       }),
     },
   );
@@ -595,6 +824,7 @@ async function callGoogle(
       inputTokens: payload.usageMetadata?.promptTokenCount ?? 0,
       outputTokens: payload.usageMetadata?.candidatesTokenCount ?? 0,
       cachedInputTokens: payload.usageMetadata?.cachedContentTokenCount ?? 0,
+      cachedWriteTokens: 0,
     },
   };
 }
