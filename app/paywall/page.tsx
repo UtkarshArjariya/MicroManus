@@ -1,12 +1,17 @@
 import { redirect } from "next/navigation";
+import { LogOut } from "lucide-react";
 
+import { signOut } from "@/app/app/actions";
 import { PaywallClient } from "@/app/paywall/paywall-client";
 import { CreditStamp } from "@/components/credit-stamp";
+import { Button } from "@/components/ui/button";
 import { Wordmark } from "@/components/wordmark";
+import { resolveAppReturnTo } from "@/lib/app-return-to";
 import { createClient } from "@/lib/supabase/server";
 
 type PaywallPageProps = {
   searchParams: Promise<{
+    returnTo?: string;
     stripe?: string;
   }>;
 };
@@ -29,21 +34,30 @@ export default async function PaywallPage({ searchParams }: PaywallPageProps) {
   const params = await searchParams;
   const paymentSuccess = params.stripe === "success";
   const paymentCancelled = params.stripe === "cancelled";
+  const returnTo = resolveAppReturnTo(params.returnTo);
   const balance = wallet?.balance ?? 0;
 
   if (balance > 0 && !paymentSuccess) {
-    redirect("/app");
+    redirect(returnTo);
   }
 
   return (
     <main className="min-h-screen bg-paper px-5 py-7 sm:px-8 sm:py-10">
       <div className="mx-auto w-full max-w-5xl">
-        <header className="flex items-center justify-between border-b border-ink/20 pb-6">
+        <header className="flex flex-col gap-5 border-b border-ink/20 pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <Wordmark href="/app" />
             <p className="mt-2 text-sm text-ink-muted">Research access desk</p>
           </div>
-          <CreditStamp balance={balance} />
+          <div className="flex w-full items-center justify-between gap-4 sm:w-auto sm:justify-start">
+            <CreditStamp balance={balance} />
+            <form action={signOut}>
+              <Button type="submit" variant="outline">
+                <LogOut aria-hidden="true" />
+                Sign out
+              </Button>
+            </form>
+          </div>
         </header>
 
         <section className="py-9 sm:py-12">
@@ -57,7 +71,11 @@ export default async function PaywallPage({ searchParams }: PaywallPageProps) {
             </p>
           </div>
           <div className="mt-8">
-            <PaywallClient paymentCancelled={paymentCancelled} paymentSuccess={paymentSuccess} />
+            <PaywallClient
+              paymentCancelled={paymentCancelled}
+              paymentSuccess={paymentSuccess}
+              returnTo={returnTo}
+            />
           </div>
         </section>
       </div>
