@@ -364,6 +364,7 @@ export function ChatClient({
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const assistantMessageId = useRef<string | null>(null);
+  const isSendingRef = useRef(false);
 
   const stepsByMessage = useMemo(() => {
     return steps.reduce<Record<string, AgentStep[]>>((acc, step) => {
@@ -382,7 +383,7 @@ export function ChatClient({
   }, [artifacts]);
 
   async function sendMessage() {
-    if (!selectedChatId || !input.trim()) {
+    if (isStreaming || isSendingRef.current || !selectedChatId || !input.trim()) {
       return;
     }
 
@@ -392,120 +393,130 @@ export function ChatClient({
     }
 
     const content = input.trim();
+    if (content.length > 8_000) {
+      setError("Message is too long. Keep it under 8,000 characters.");
+      return;
+    }
+
+    isSendingRef.current = true;
     setInput("");
     setError(null);
     setIsStreaming(true);
 
-    const response = await fetch(`/api/chats/${selectedChatId}/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
-    });
+    try {
+      const response = await fetch(`/api/chats/${selectedChatId}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
 
-    if (!response.ok || !response.body) {
-      const payload = (await response.json().catch(() => null)) as { error?: string; redirectTo?: string } | null;
-      if (response.status === 402 && payload?.redirectTo) {
-        window.location.href = payload.redirectTo;
+      if (!response.ok || !response.body) {
+        const payload = (await response.json().catch(() => null)) as { error?: string; redirectTo?: string } | null;
+        if (response.status === 402 && payload?.redirectTo) {
+          window.location.href = payload.redirectTo;
+          return;
+        }
+        setError(payload?.error ?? "Message send failed.");
         return;
       }
-      setError(payload?.error ?? "Message send failed.");
-      setIsStreaming(false);
-      return;
-    }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const packets = buffer.split("\n\n");
-      buffer = packets.pop() ?? "";
-
-      for (const packet of packets) {
-        const eventLine = packet.split("\n").find((line) => line.startsWith("event: "));
-        const dataLine = packet.split("\n").find((line) => line.startsWith("data: "));
-        if (!eventLine || !dataLine) {
-          continue;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
         }
 
-        const event = eventLine.slice(7);
-        const data = JSON.parse(dataLine.slice(6)) as {
-          userMessage?: Message;
-          assistantMessage?: Message;
-          messageId?: string;
-          chunk?: string;
-          error?: string;
-          id?: string;
-          message_id?: string;
-          title?: string;
-          storage_path?: string;
-          signed_url?: string;
-          created_at?: string;
-          expires_at?: string;
-          balance?: number;
-        };
+        buffer += decoder.decode(value, { stream: true });
+        const packets = buffer.split("\n\n");
+        buffer = packets.pop() ?? "";
 
-        if (event === "message" && data.userMessage && data.assistantMessage) {
-          assistantMessageId.current = data.assistantMessage.id;
-          setMessages((current) => [...current, data.userMessage!, data.assistantMessage!]);
-        }
+        for (const packet of packets) {
+          const eventLine = packet.split("\n").find((line) => line.startsWith("event: "));
+          const dataLine = packet.split("\n").find((line) => line.startsWith("data: "));
+          if (!eventLine || !dataLine) {
+            continue;
+          }
 
-        if (event === "step") {
-          setSteps((current) => [...current, data as unknown as AgentStep]);
-        }
-
-        if (
-          event === "artifact" &&
-          typeof data.id === "string" &&
-          typeof data.message_id === "string" &&
-          typeof data.title === "string" &&
-          typeof data.storage_path === "string" &&
-          typeof data.signed_url === "string" &&
-          typeof data.created_at === "string" &&
-          typeof data.expires_at === "string"
-        ) {
-          const artifact: ReportArtifact = {
-            id: data.id,
-            message_id: data.message_id,
-            title: data.title,
-            storage_path: data.storage_path,
-            signed_url: data.signed_url,
-            created_at: data.created_at,
-            expires_at: data.expires_at,
+          const event = eventLine.slice(7);
+          const data = JSON.parse(dataLine.slice(6)) as {
+            userMessage?: Message;
+            assistantMessage?: Message;
+            messageId?: string;
+            chunk?: string;
+            error?: string;
+            id?: string;
+            message_id?: string;
+            title?: string;
+            storage_path?: string;
+            signed_url?: string;
+            created_at?: string;
+            expires_at?: string;
+            balance?: number;
           };
 
-          setArtifacts((current) => [
-            ...current.filter((item) => item.id !== artifact.id),
-            artifact,
-          ]);
-        }
+          if (event === "message" && data.userMessage && data.assistantMessage) {
+            assistantMessageId.current = data.assistantMessage.id;
+            setMessages((current) => [...current, data.userMessage!, data.assistantMessage!]);
+          }
 
-        if (event === "content" && data.messageId && data.chunk) {
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === data.messageId ? { ...message, content: `${message.content}${data.chunk}` } : message,
-            ),
-          );
-        }
+          if (event === "step") {
+            setSteps((current) => [...current, data as unknown as AgentStep]);
+          }
 
-        if (event === "error") {
-          setError(data.error ?? "Agent failed.");
-        }
+          if (
+            event === "artifact" &&
+            typeof data.id === "string" &&
+            typeof data.message_id === "string" &&
+            typeof data.title === "string" &&
+            typeof data.storage_path === "string" &&
+            typeof data.signed_url === "string" &&
+            typeof data.created_at === "string" &&
+            typeof data.expires_at === "string"
+          ) {
+            const artifact: ReportArtifact = {
+              id: data.id,
+              message_id: data.message_id,
+              title: data.title,
+              storage_path: data.storage_path,
+              signed_url: data.signed_url,
+              created_at: data.created_at,
+              expires_at: data.expires_at,
+            };
 
-        if (event === "credit" && typeof data.balance === "number") {
-          setBalance(data.balance);
+            setArtifacts((current) => [
+              ...current.filter((item) => item.id !== artifact.id),
+              artifact,
+            ]);
+          }
+
+          if (event === "content" && data.messageId && data.chunk) {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === data.messageId ? { ...message, content: `${message.content}${data.chunk}` } : message,
+              ),
+            );
+          }
+
+          if (event === "error") {
+            setError(data.error ?? "Agent failed.");
+          }
+
+          if (event === "credit" && typeof data.balance === "number") {
+            setBalance(data.balance);
+          }
         }
       }
+    } catch {
+      setError("Network error while sending. Check the connection and retry.");
+    } finally {
+      assistantMessageId.current = null;
+      isSendingRef.current = false;
+      setIsStreaming(false);
     }
-
-    assistantMessageId.current = null;
-    setIsStreaming(false);
   }
 
   return (
@@ -628,9 +639,10 @@ export function ChatClient({
                   }
                 }}
                 placeholder="Ask MicroManus to research something..."
+                maxLength={8_000}
                 disabled={isStreaming || balance <= 0}
               />
-              <Button disabled={isStreaming || !input.trim()} onClick={sendMessage}>
+              <Button disabled={isStreaming || balance <= 0 || !input.trim()} onClick={sendMessage}>
                 {isStreaming ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
                 Send
               </Button>
