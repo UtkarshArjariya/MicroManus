@@ -3,6 +3,8 @@ import "server-only";
 import type { ProviderId } from "@/lib/models";
 import { anthropicTools, openAiTools } from "@/lib/agent/tools";
 
+const PROVIDER_TIMEOUT_MS = 60_000;
+
 export type ChatMessage = {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
@@ -34,6 +36,16 @@ export type ProviderCredentials = {
   model: string;
   promptCacheKey?: string;
 };
+
+export class ProviderRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "ProviderRequestError";
+  }
+}
 
 type OpenAiMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -88,6 +100,64 @@ function openAiBaseUrl(credentials: ProviderCredentials) {
   }
 
   return credentials.baseUrl || "";
+}
+
+function providerDisplayName(provider: ProviderId) {
+  if (provider === "anthropic") {
+    return "Anthropic";
+  }
+
+  if (provider === "kimi") {
+    return "Kimi";
+  }
+
+  if (provider === "openai_compatible") {
+    return "the custom provider";
+  }
+
+  return "OpenAI";
+}
+
+function friendlyProviderError(provider: ProviderId, status: number) {
+  const name = providerDisplayName(provider);
+
+  if (status === 401 || status === 403) {
+    return `${name} rejected this API key or project. Update the key in Settings and try again.`;
+  }
+
+  if (status === 408 || status === 504) {
+    return `${name} timed out. Retry in a moment or switch models.`;
+  }
+
+  if (status === 429) {
+    return `${name} rate-limited this request. Wait a moment, then retry.`;
+  }
+
+  if (status >= 500) {
+    return `${name} is temporarily unavailable. Retry in a moment.`;
+  }
+
+  return `${name} could not complete the request. Check the key, model, and provider settings.`;
+}
+
+async function providerFetch(provider: ProviderId, input: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new ProviderRequestError(friendlyProviderError(provider, 504), 504);
+    }
+
+    throw new ProviderRequestError(`${providerDisplayName(provider)} could not be reached. Check the provider status and try again.`);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function callProvider(
@@ -157,7 +227,7 @@ async function callOpenAiCompatible(
     throw new Error("Missing OpenAI-compatible base URL.");
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const response = await providerFetch(credentials.provider, `${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${credentials.apiKey}`,
@@ -191,7 +261,7 @@ async function callOpenAiCompatible(
   } | null;
 
   if (!response.ok) {
-    throw new Error(payload?.error?.message ?? `Provider failed with HTTP ${response.status}.`);
+    throw new ProviderRequestError(friendlyProviderError(credentials.provider, response.status), response.status);
   }
 
   const assistant = payload?.choices?.[0]?.message ?? { role: "assistant", content: "" };
@@ -252,7 +322,7 @@ async function callAnthropic(
       : {}),
   }));
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await providerFetch(credentials.provider, "https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "anthropic-version": "2023-06-01",
@@ -281,7 +351,7 @@ async function callAnthropic(
   } | null;
 
   if (!response.ok) {
-    throw new Error(payload?.error?.message ?? `Anthropic failed with HTTP ${response.status}.`);
+    throw new ProviderRequestError(friendlyProviderError(credentials.provider, response.status), response.status);
   }
 
   const content = payload?.content ?? [];
