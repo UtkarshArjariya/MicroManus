@@ -1,7 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { KeyRound, ListRestart, Loader2, Pencil, Trash2, X } from "lucide-react";
+import { KeyRound, ListRestart, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 
 import { deleteProviderKey, saveProviderKey } from "@/app/app/settings/keys/actions";
 import { InterfaceNotice } from "@/components/interface-notice";
@@ -49,6 +50,7 @@ function connectionError(status: number) {
 }
 
 function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
+  const router = useRouter();
   const [provider, setProvider] = useState<ProviderId>(existing?.provider ?? "openai");
   const [apiFormat, setApiFormat] = useState<ProviderApiFormat>(
     getProviderApiFormat(existing?.provider ?? "openai", existing?.api_format),
@@ -133,7 +135,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
       const response = await fetch("/api/provider-keys/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, apiKey, baseUrl, model, apiFormat }),
+        body: JSON.stringify({ provider, apiKey, baseUrl, model, apiFormat, providerKeyId: existing?.id }),
       });
 
       if (!response.ok) {
@@ -166,6 +168,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
             tone: "success",
           });
           if (!existing && result.ok) setApiKey("");
+          if (result.ok) router.refresh();
         });
       }}
       className={existing ? "border-t border-ink/15 pt-5" : "border border-ink/20 bg-paper-surface p-5 sm:p-6"}
@@ -231,7 +234,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
       {provider === "openai_compatible" ? (
         <fieldset className="mt-4">
           <legend className="mb-2 text-sm font-semibold">API compatibility</legend>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             {PROVIDER_API_FORMATS.map((format) => (
               <button
                 key={format.value}
@@ -313,7 +316,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
           {isLoadingModels ? <Loader2 className="animate-spin" aria-hidden="true" /> : <ListRestart aria-hidden="true" />}
           {loadedModels.length > 0 ? "Refresh models" : "Load all models"}
         </Button>
-        <Button disabled={!apiKey} type="button" variant="text" onClick={testConnection}>Test connection</Button>
+        <Button disabled={!apiKey && !existing} type="button" variant="text" onClick={testConnection}>Test connection</Button>
       </div>
       {status ? <InterfaceNotice className="mt-4" tone={status.tone}>{status.message}</InterfaceNotice> : null}
     </form>
@@ -321,6 +324,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
 }
 
 function DeleteKeyForm({ id, label }: { id: string; label: string }) {
+  const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -340,6 +344,7 @@ function DeleteKeyForm({ id, label }: { id: string; label: string }) {
           setStatus(null);
           const result = await deleteProviderKey(formData);
           if (result.error) setStatus(result.error);
+          if (result.ok) router.refresh();
         });
       }}
       className="flex flex-wrap items-center justify-end gap-2"
@@ -357,9 +362,15 @@ function DeleteKeyForm({ id, label }: { id: string; label: string }) {
   );
 }
 
-function SavedKeyRow({ keyRow }: { keyRow: ProviderKeyRow }) {
-  const [editing, setEditing] = useState(false);
-
+function SavedKeyRow({
+  editing,
+  keyRow,
+  onToggleEditing,
+}: {
+  editing: boolean;
+  keyRow: ProviderKeyRow;
+  onToggleEditing: () => void;
+}) {
   return (
     <div className="border-b border-ink/20 py-5">
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
@@ -380,7 +391,7 @@ function SavedKeyRow({ keyRow }: { keyRow: ProviderKeyRow }) {
           {keyRow.base_url ? <p className="mt-1 break-all font-mono text-[0.68rem] text-ink-muted">{keyRow.base_url}</p> : null}
         </div>
         <div className="flex items-center justify-between gap-2 sm:justify-end">
-          <Button onClick={() => setEditing((value) => !value)} size="sm" type="button" variant="text">
+          <Button onClick={onToggleEditing} size="sm" type="button" variant="text">
             <Pencil aria-hidden="true" />{editing ? "Close editor" : "Edit or test"}
           </Button>
           <DeleteKeyForm id={keyRow.id} label={keyRow.label} />
@@ -392,24 +403,43 @@ function SavedKeyRow({ keyRow }: { keyRow: ProviderKeyRow }) {
 }
 
 export function KeysClient({ keys }: { keys: ProviderKeyRow[] }) {
-  return (
-    <div className="space-y-9">
-      <ProviderForm />
+  const [activeForm, setActiveForm] = useState<"new" | string | null>(keys.length === 0 ? "new" : null);
 
+  return (
+    <div className="space-y-6">
       <section aria-labelledby="saved-keys-heading">
-        <div className="flex items-end justify-between border-b border-ink/25 pb-3">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-ink/25 pb-3">
           <div>
             <p className="utility-label">Key registry</p>
             <h2 id="saved-keys-heading" className="mt-1 text-2xl font-semibold">Saved keys</h2>
           </div>
-          <span className="font-mono text-xs text-ink-muted">{keys.length}</span>
+          {activeForm === null ? (
+            <Button onClick={() => setActiveForm("new")} size="sm" type="button">
+              <Plus aria-hidden="true" />
+              Add provider key
+            </Button>
+          ) : (
+            <Button onClick={() => setActiveForm(null)} size="sm" type="button" variant="outline">
+              <X aria-hidden="true" />
+              Close key editor
+            </Button>
+          )}
         </div>
+
+        {activeForm === "new" ? <div className="mt-5"><ProviderForm /></div> : null}
 
         {keys.length === 0 ? (
           <div className="border-b border-ink/20 py-7">
-            <p className="text-sm text-ink-muted">No keys are ready yet. Add one above to start a research chat.</p>
+            <p className="text-sm text-ink-muted">No keys are ready yet. Add one to start a chat.</p>
           </div>
-        ) : keys.map((keyRow) => <SavedKeyRow key={keyRow.id} keyRow={keyRow} />)}
+        ) : keys.map((keyRow) => (
+          <SavedKeyRow
+            editing={activeForm === keyRow.id}
+            key={keyRow.id}
+            keyRow={keyRow}
+            onToggleEditing={() => setActiveForm((current) => current === keyRow.id ? null : keyRow.id)}
+          />
+        ))}
       </section>
     </div>
   );
