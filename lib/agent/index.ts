@@ -252,7 +252,13 @@ export async function runAgent(options: AgentRunOptions) {
   let finalAnswer = "";
 
   for (let i = 0; i < MAX_AGENT_STEPS; i += 1) {
-    const response = await callProvider(options.credentials, messages, workingMessages, route.toolNames);
+    const availableTools = route.kind === "research" &&
+      researchEvidenceComplete(successfulSearchQueries, successfulPageReads)
+      ? route.wantsArtifact && !artifactCreated
+        ? (["generate_pdf_report"] satisfies ProviderToolName[])
+        : []
+      : route.toolNames;
+    const response = await callProvider(options.credentials, messages, workingMessages, availableTools);
 
     await options.onUsage({
       ...response.usage,
