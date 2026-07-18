@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 
+import { DEFAULT_APP_RETURN_TO, validateAppReturnTo } from "@/lib/app-return-to";
 import { CREDIT_UNLOCK_AMOUNT, normalizeCouponCode, VALID_COUPON_CODE } from "@/lib/credits";
 import { logServerError } from "@/lib/server-errors";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -13,6 +14,14 @@ type RedeemState = {
 
 export async function redeemCoupon(_previousState: RedeemState, formData: FormData): Promise<RedeemState> {
   const code = normalizeCouponCode(String(formData.get("code") ?? ""));
+  const requestedReturnTo = formData.get("returnTo");
+  const returnTo = requestedReturnTo === null
+    ? DEFAULT_APP_RETURN_TO
+    : validateAppReturnTo(requestedReturnTo);
+
+  if (!returnTo) {
+    return { error: "We couldn’t return to that page safely. Refresh and try again." };
+  }
 
   if (code !== VALID_COUPON_CODE) {
     return { error: "That code didn’t match our records. Try again, or pay by card instead." };
@@ -58,5 +67,5 @@ export async function redeemCoupon(_previousState: RedeemState, formData: FormDa
     return { error: "We couldn’t check that code. Try again in a moment, or pay by card instead." };
   }
 
-  redirect("/app");
+  redirect(returnTo);
 }
