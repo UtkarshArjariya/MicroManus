@@ -7,6 +7,7 @@ import { BarChart3, CreditCard, Download, FileText, Loader2, Plus, Search, Send,
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { parseJsonResponse } from "@/lib/http";
 import { getModelsForProvider, type ProviderId } from "@/lib/models";
 
 type ProviderKey = {
@@ -239,18 +240,30 @@ function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
     }
 
     setIsCreating(true);
-    const response = await fetch("/api/chats", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ providerKeyId, model }),
-    });
-    const payload = (await response.json().catch(() => null)) as { id?: string; error?: string } | null;
-    setIsCreating(false);
+    try {
+      const response = await fetch("/api/chats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerKeyId, model }),
+      });
 
-    if (payload?.id) {
+      if (!response.ok) {
+        const errorPayload = await parseJsonResponse<{ error?: string }>(response);
+        alert(errorPayload?.error ?? "Something went wrong. Try again.");
+        return;
+      }
+
+      const payload = await parseJsonResponse<{ id?: string }>(response);
+      if (!payload?.id) {
+        alert("Something went wrong. Try again.");
+        return;
+      }
+
       window.location.href = `/app/${payload.id}`;
-    } else {
-      alert(payload?.error ?? "Could not create chat.");
+    } catch {
+      alert("Something went wrong. Try again.");
+    } finally {
+      setIsCreating(false);
     }
   }
 
@@ -411,7 +424,7 @@ export function ChatClient({
       });
 
       if (!response.ok || !response.body) {
-        const payload = (await response.json().catch(() => null)) as { error?: string; redirectTo?: string } | null;
+        const payload = await parseJsonResponse<{ error?: string; redirectTo?: string }>(response);
         if (response.status === 402 && payload?.redirectTo) {
           window.location.href = payload.redirectTo;
           return;
