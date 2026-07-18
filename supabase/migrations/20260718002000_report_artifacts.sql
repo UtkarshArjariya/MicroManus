@@ -1,6 +1,6 @@
-alter type public.agent_step_type add value 'artifact';
+alter type public.agent_step_type add value if not exists 'artifact';
 
-create table public.report_artifacts (
+create table if not exists public.report_artifacts (
   id uuid primary key default gen_random_uuid(),
   chat_id uuid not null references public.chats(id) on delete cascade,
   message_id uuid not null references public.messages(id) on delete cascade,
@@ -9,8 +9,8 @@ create table public.report_artifacts (
   created_at timestamptz not null default now()
 );
 
-create index report_artifacts_chat_created_idx on public.report_artifacts(chat_id, created_at desc);
-create index report_artifacts_message_idx on public.report_artifacts(message_id);
+create index if not exists report_artifacts_chat_created_idx on public.report_artifacts(chat_id, created_at desc);
+create index if not exists report_artifacts_message_idx on public.report_artifacts(message_id);
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
@@ -27,6 +27,7 @@ set public = false,
 
 alter table public.report_artifacts enable row level security;
 
+drop policy if exists "report_artifacts_select_own_chat" on public.report_artifacts;
 create policy "report_artifacts_select_own_chat"
 on public.report_artifacts for select
 to authenticated
