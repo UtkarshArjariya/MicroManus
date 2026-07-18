@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
-import { getDefaultBaseUrl, type ProviderId } from "@/lib/models";
+import {
+  getDefaultBaseUrl,
+  getProviderApiFormat,
+  isProviderApiFormat,
+  type ProviderApiFormat,
+  type ProviderId,
+} from "@/lib/models";
 import { jsonInternalError, logServerError } from "@/lib/server-errors";
 
-const PROVIDERS = new Set<ProviderId>(["openai", "anthropic", "kimi", "openai_compatible"]);
+const PROVIDERS = new Set<ProviderId>(["openai", "anthropic", "google", "kimi", "openai_compatible"]);
 const TEST_TIMEOUT_MS = 15_000;
 
 function jsonError(message: string, status = 400) {
@@ -24,14 +30,31 @@ async function testOpenAiCompatible(apiKey: string, baseUrl: string) {
   }
 }
 
-async function testAnthropic(apiKey: string) {
-  const response = await fetchWithTimeout("https://api.anthropic.com/v1/models?limit=1", {
+async function testAnthropic(apiKey: string, baseUrl: string) {
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, "")}/models?limit=1`, {
     headers: {
       "anthropic-version": "2023-06-01",
       "x-api-key": apiKey,
       Accept: "application/json",
     },
   });
+
+  if (!response.ok) {
+    throw new Error(testErrorForStatus(response.status));
+  }
+}
+
+async function testGoogle(apiKey: string, baseUrl: string, model: string) {
+  const modelId = model.replace(/^models\//, "");
+  const response = await fetchWithTimeout(
+    `${baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(modelId)}`,
+    {
+      headers: {
+        "x-goog-api-key": apiKey,
+        Accept: "application/json",
+      },
+    },
+  );
 
   if (!response.ok) {
     throw new Error(testErrorForStatus(response.status));
@@ -90,11 +113,14 @@ export async function POST(request: Request) {
       provider?: ProviderId;
       apiKey?: string;
       baseUrl?: string;
+      apiFormat?: ProviderApiFormat;
+      model?: string;
     } | null;
 
     provider = body?.provider;
     const apiKey = body?.apiKey?.trim();
     const baseUrl = body?.baseUrl?.trim() || (provider ? getDefaultBaseUrl(provider) : "");
+    const model = body?.model?.trim();
 
     if (!provider || !PROVIDERS.has(provider)) {
       return jsonError("Choose a supported provider, then retry the connection.");
@@ -105,12 +131,25 @@ export async function POST(request: Request) {
     }
 
     if (provider === "openai_compatible" && !baseUrl) {
-      return jsonError("Base URL is required for custom OpenAI-compatible providers.");
+      return jsonError("Base URL is required for custom endpoints.");
+    }
+
+    const apiFormat = provider === "openai_compatible"
+      ? body?.apiFormat
+      : getProviderApiFormat(provider);
+    if (!apiFormat || !isProviderApiFormat(apiFormat)) {
+      return jsonError("Choose how the custom endpoint is API-compatible.");
+    }
+
+    if (apiFormat === "google" && !model) {
+      return jsonError("Enter a Google model ID before testing the connection.");
     }
 
     try {
-      if (provider === "anthropic") {
-        await testAnthropic(apiKey);
+      if (apiFormat === "anthropic") {
+        await testAnthropic(apiKey, baseUrl);
+      } else if (apiFormat === "google") {
+        await testGoogle(apiKey, baseUrl, model!);
       } else {
         await testOpenAiCompatible(apiKey, baseUrl);
       }
