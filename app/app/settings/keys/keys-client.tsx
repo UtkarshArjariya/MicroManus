@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { KeyRound, Loader2, Pencil, Trash2, X } from "lucide-react";
+import { KeyRound, ListRestart, Loader2, Pencil, Trash2, X } from "lucide-react";
 
 import { deleteProviderKey, saveProviderKey } from "@/app/app/settings/keys/actions";
 import { InterfaceNotice } from "@/components/interface-notice";
@@ -31,6 +31,7 @@ type ProviderKeyRow = {
 };
 
 type FormStatus = { message: string; tone: "error" | "success" | "info" };
+type AvailableModel = { id: string; label: string };
 
 const PROVIDERS: Array<{ value: ProviderId; label: string }> = [
   { value: "openai", label: "OpenAI" },
@@ -56,9 +57,16 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
   const [model, setModel] = useState(existing?.default_model ?? getDefaultModel(existing?.provider ?? "openai"));
   const [label, setLabel] = useState(existing?.label ?? `${providerName(existing?.provider ?? "openai")} key`);
   const [apiKey, setApiKey] = useState("");
+  const [loadedModels, setLoadedModels] = useState<AvailableModel[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [status, setStatus] = useState<FormStatus | null>(null);
   const [isPending, startTransition] = useTransition();
-  const modelOptions = useMemo(() => getModelsForProvider(provider), [provider]);
+  const modelOptions = useMemo(() => {
+    const models = new Map<string, AvailableModel>();
+    getModelsForProvider(provider).forEach((item) => models.set(item.modelId, { id: item.modelId, label: item.label }));
+    loadedModels.forEach((item) => models.set(item.id, item));
+    return [...models.values()];
+  }, [loadedModels, provider]);
 
   function onProviderChange(value: ProviderId) {
     setProvider(value);
@@ -70,7 +78,42 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
     );
     setBaseUrl(existing?.provider === value ? existing.base_url ?? getDefaultBaseUrl(value) : getDefaultBaseUrl(value));
     setModel(existing?.provider === value ? existing.default_model : getDefaultModel(value));
+    setLoadedModels([]);
     setStatus(null);
+  }
+
+  async function loadModels(silent = false) {
+    setIsLoadingModels(true);
+    if (!silent) setStatus({ message: "Loading every model available to this key…", tone: "info" });
+
+    try {
+      const response = await fetch("/api/provider-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          apiFormat,
+          apiKey,
+          baseUrl,
+          providerKeyId: existing?.id,
+        }),
+      });
+      const payload = await parseJsonResponse<{ models?: AvailableModel[]; error?: string }>(response);
+      if (!response.ok || !payload?.models) {
+        setStatus({ message: payload?.error ?? "The provider couldn’t list models.", tone: "error" });
+        return;
+      }
+      setLoadedModels(payload.models);
+      if (!model && payload.models[0]) setModel(payload.models[0].id);
+      setStatus({
+        message: `Loaded ${payload.models.length} ${payload.models.length === 1 ? "model" : "models"} available to this key.`,
+        tone: "success",
+      });
+    } catch {
+      setStatus({ message: "We couldn’t reach the model catalog. Check the key and try again.", tone: "error" });
+    } finally {
+      setIsLoadingModels(false);
+    }
   }
 
   async function testConnection() {
@@ -187,7 +230,10 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
                     ? "border-ink bg-paper-deep text-ink"
                     : "border-ink/20 text-ink-muted hover:border-ink/50"
                 }`}
-                onClick={() => setApiFormat(format.value)}
+                onClick={() => {
+                  setApiFormat(format.value);
+                  setLoadedModels([]);
+                }}
                 type="button"
               >
                 <span className="block text-xs font-semibold">{format.label}</span>
@@ -212,7 +258,10 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
             required={provider === "openai_compatible"}
             disabled={provider !== "openai_compatible"}
             value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
+            onChange={(event) => {
+              setBaseUrl(event.target.value);
+              setLoadedModels([]);
+            }}
           />
         </label>
         <label className="block space-y-2 text-sm">
@@ -227,8 +276,11 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
             required
           />
           <datalist id={`models-${existing?.id ?? "new"}`}>
-            {modelOptions.map((item) => <option key={item.modelId} value={item.modelId}>{item.label}</option>)}
+            {modelOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </datalist>
+          <p className="text-[0.68rem] leading-4 text-ink-muted">
+            Choose a loaded model or enter any model ID supported by this endpoint.
+          </p>
         </label>
       </div>
 
@@ -236,6 +288,15 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
         <Button disabled={isPending} type="submit">
           {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <KeyRound aria-hidden="true" />}
           {existing ? "Save changes" : "Add key"}
+        </Button>
+        <Button
+          disabled={isLoadingModels || (!existing && !apiKey)}
+          onClick={() => void loadModels()}
+          type="button"
+          variant="outline"
+        >
+          {isLoadingModels ? <Loader2 className="animate-spin" aria-hidden="true" /> : <ListRestart aria-hidden="true" />}
+          {loadedModels.length > 0 ? "Refresh models" : "Load all models"}
         </Button>
         <Button disabled={!apiKey} type="button" variant="text" onClick={testConnection}>Test connection</Button>
       </div>
