@@ -9,6 +9,7 @@ import {
   REPORT_SIGNED_URL_TTL_SECONDS,
   createReportSignedUrl,
 } from "@/lib/report-artifacts";
+import { logServerError } from "@/lib/server-errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type SearchResult = {
@@ -543,6 +544,11 @@ async function generatePdfReport(input: unknown, context: ToolRunContext) {
       });
 
     if (uploadError) {
+      logServerError("agent/report.upload", uploadError, {
+        chatId: context.chatId,
+        messageId: context.messageId,
+        storagePath,
+      });
       return { error: `PDF upload failed: ${uploadError.message}` };
     }
 
@@ -561,6 +567,11 @@ async function generatePdfReport(input: unknown, context: ToolRunContext) {
 
     if (insertError || !artifact) {
       await admin.storage.from(REPORT_ARTIFACTS_BUCKET).remove([storagePath]);
+      logServerError("agent/report.metadata", insertError ?? new Error("Artifact insert returned no row"), {
+        chatId: context.chatId,
+        messageId: context.messageId,
+        storagePath,
+      });
       return { error: `Report metadata insert failed: ${insertError?.message ?? "Unknown error"}` };
     }
 
@@ -582,6 +593,10 @@ async function generatePdfReport(input: unknown, context: ToolRunContext) {
       sources,
     };
   } catch (error) {
+    logServerError("agent/report", error, {
+      chatId: context.chatId,
+      messageId: context.messageId,
+    });
     return {
       error: `Report generation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
     };
@@ -615,6 +630,7 @@ async function webSearch(query: string): Promise<{ results?: SearchResult[]; err
       },
     });
   } catch (error) {
+    logServerError("agent/web-search.fetch", error, { query: query.slice(0, 120) });
     return {
       error: error instanceof Error && error.name === "AbortError"
         ? "Brave Search timed out. Try again in a moment."
@@ -625,10 +641,14 @@ async function webSearch(query: string): Promise<{ results?: SearchResult[]; err
   }
 
   if (!response.ok) {
+    logServerError("agent/web-search.response", new Error(`Brave Search returned HTTP ${response.status}.`), {
+      status: response.status,
+      query: query.slice(0, 120),
+    });
     return { error: `Brave Search failed with HTTP ${response.status}.` };
   }
 
-  const payload = (await response.json()) as {
+  let payload: {
     web?: {
       results?: Array<{
         title?: string;
@@ -637,6 +657,13 @@ async function webSearch(query: string): Promise<{ results?: SearchResult[]; err
       }>;
     };
   };
+
+  try {
+    payload = (await response.json()) as typeof payload;
+  } catch (error) {
+    logServerError("agent/web-search.parse", error, { query: query.slice(0, 120) });
+    return { error: "Brave Search returned an invalid response." };
+  }
 
   return {
     results: (payload.web?.results ?? []).slice(0, 5).map((result) => ({
@@ -665,6 +692,7 @@ async function fetchPage(url: string): Promise<{ url?: string; text?: string; er
       },
     });
   } catch (error) {
+    logServerError("agent/fetch-page.fetch", error, { url: validated.toString() });
     return {
       url,
       error: error instanceof Error && error.name === "AbortError"
@@ -676,6 +704,10 @@ async function fetchPage(url: string): Promise<{ url?: string; text?: string; er
   }
 
   if (!response.ok) {
+    logServerError("agent/fetch-page.response", new Error(`Page returned HTTP ${response.status}.`), {
+      status: response.status,
+      url: validated.toString(),
+    });
     return { url, error: `Fetch failed with HTTP ${response.status}.` };
   }
 
