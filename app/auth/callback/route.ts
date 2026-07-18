@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSiteUrl } from "@/lib/env";
+import { resolveAppReturnTo } from "@/lib/app-return-to";
 import { logServerError } from "@/lib/server-errors";
 import { createClient } from "@/lib/supabase/server";
 
@@ -10,7 +11,7 @@ export async function GET(request: Request) {
   try {
     const requestUrl = new URL(request.url);
     const code = requestUrl.searchParams.get("code");
-    const next = requestUrl.searchParams.get("next") ?? "/app";
+    const next = resolveAppReturnTo(requestUrl.searchParams.get("next"));
     siteUrl = getSiteUrl();
 
     if (code) {
