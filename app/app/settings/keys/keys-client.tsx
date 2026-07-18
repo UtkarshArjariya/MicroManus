@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { KeyRound, ListRestart, Loader2, Pencil, Trash2, X } from "lucide-react";
 
 import { deleteProviderKey, saveProviderKey } from "@/app/app/settings/keys/actions";
@@ -31,7 +31,7 @@ type ProviderKeyRow = {
 };
 
 type FormStatus = { message: string; tone: "error" | "success" | "info" };
-type AvailableModel = { id: string; label: string };
+type AvailableModel = { id: string; label: string; releasedAt?: string | null };
 
 const PROVIDERS: Array<{ value: ProviderId; label: string }> = [
   { value: "openai", label: "OpenAI" },
@@ -61,10 +61,15 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [status, setStatus] = useState<FormStatus | null>(null);
   const [isPending, startTransition] = useTransition();
+  const hasLoadedInitialModels = useRef(false);
   const modelOptions = useMemo(() => {
     const models = new Map<string, AvailableModel>();
-    getModelsForProvider(provider).forEach((item) => models.set(item.modelId, { id: item.modelId, label: item.label }));
     loadedModels.forEach((item) => models.set(item.id, item));
+    getModelsForProvider(provider).forEach((item) => {
+      if (!models.has(item.modelId)) {
+        models.set(item.modelId, { id: item.modelId, label: item.label });
+      }
+    });
     return [...models.values()];
   }, [loadedModels, provider]);
 
@@ -82,7 +87,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
     setStatus(null);
   }
 
-  async function loadModels(silent = false) {
+  const loadModels = useCallback(async (silent = false) => {
     setIsLoadingModels(true);
     if (!silent) setStatus({ message: "Loading every model available to this key…", tone: "info" });
 
@@ -104,9 +109,9 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
         return;
       }
       setLoadedModels(payload.models);
-      if (!model && payload.models[0]) setModel(payload.models[0].id);
+      setModel((current) => current || payload.models?.[0]?.id || "");
       setStatus({
-        message: `Loaded ${payload.models.length} ${payload.models.length === 1 ? "model" : "models"} available to this key.`,
+        message: `Loaded ${payload.models.length} ${payload.models.length === 1 ? "model" : "models"}, newest releases first.`,
         tone: "success",
       });
     } catch {
@@ -114,7 +119,13 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
     } finally {
       setIsLoadingModels(false);
     }
-  }
+  }, [apiFormat, apiKey, baseUrl, existing?.id, provider]);
+
+  useEffect(() => {
+    if (!existing || hasLoadedInitialModels.current) return;
+    hasLoadedInitialModels.current = true;
+    void loadModels(true);
+  }, [existing, loadModels]);
 
   async function testConnection() {
     setStatus({ message: "Testing the provider connection…", tone: "info" });
@@ -276,7 +287,11 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
             required
           />
           <datalist id={`models-${existing?.id ?? "new"}`}>
-            {modelOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            {modelOptions.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}{item.releasedAt ? ` · ${item.releasedAt.slice(0, 10)}` : ""}
+              </option>
+            ))}
           </datalist>
           <p className="text-[0.68rem] leading-4 text-ink-muted">
             Choose a loaded model or enter any model ID supported by this endpoint.
