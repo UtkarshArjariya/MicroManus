@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
-import { Loader2, Plus, Search, Send, Settings } from "lucide-react";
+import { BarChart3, CreditCard, Download, FileText, Loader2, Plus, Search, Send, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,11 +38,21 @@ type AgentStep = {
   id: string;
   message_id: string;
   step_index: number;
-  type: "thought" | "tool_call" | "tool_result" | "final_answer";
+  type: "thought" | "tool_call" | "tool_result" | "artifact" | "final_answer";
   tool_name: string | null;
   tool_input: unknown;
   tool_output: unknown;
   created_at: string;
+};
+
+type ReportArtifact = {
+  id: string;
+  message_id: string;
+  title: string;
+  storage_path: string;
+  created_at: string;
+  signed_url: string;
+  expires_at: string;
 };
 
 function formatDate(value: string) {
@@ -144,6 +154,20 @@ function renderMarkdown(markdown: string) {
 }
 
 function stepTitle(step: AgentStep) {
+  if (step.type === "artifact") {
+    const title = typeof step.tool_output === "object" && step.tool_output !== null && "title" in step.tool_output
+      ? String((step.tool_output as { title?: unknown }).title ?? "")
+      : "PDF report";
+    return `PDF report generated: ${title}`;
+  }
+
+  if (step.type === "tool_call" && step.tool_name === "generate_pdf_report") {
+    const title = typeof step.tool_input === "object" && step.tool_input !== null && "title" in step.tool_input
+      ? String((step.tool_input as { title?: unknown }).title ?? "")
+      : "PDF report";
+    return `Generating PDF report: ${title}`;
+  }
+
   if (step.type === "tool_call" && step.tool_name === "web_search") {
     const query = typeof step.tool_input === "object" && step.tool_input !== null && "query" in step.tool_input
       ? String((step.tool_input as { query?: unknown }).query ?? "")
@@ -167,6 +191,30 @@ function stepTitle(step: AgentStep) {
   }
 
   return "Final answer";
+}
+
+function ArtifactCard({ artifact }: { artifact: ReportArtifact }) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-md border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+          <FileText className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{artifact.title}</p>
+          <p className="text-xs text-muted-foreground">
+            PDF report · link expires {formatDate(artifact.expires_at)}
+          </p>
+        </div>
+      </div>
+      <Button asChild size="sm" variant="outline">
+        <a href={artifact.signed_url}>
+          <Download className="h-4 w-4" aria-hidden="true" />
+          Download
+        </a>
+      </Button>
+    </div>
+  );
 }
 
 function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
@@ -297,17 +345,21 @@ export function ChatClient({
   keys,
   messages: initialMessages,
   steps: initialSteps,
-  balance,
+  artifacts: initialArtifacts,
+  balance: initialBalance,
 }: {
   selectedChatId: string | null;
   chats: Chat[];
   keys: ProviderKey[];
   messages: Message[];
   steps: AgentStep[];
+  artifacts: ReportArtifact[];
   balance: number;
 }) {
   const [messages, setMessages] = useState(initialMessages);
   const [steps, setSteps] = useState(initialSteps);
+  const [artifacts, setArtifacts] = useState(initialArtifacts);
+  const [balance, setBalance] = useState(initialBalance);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -320,8 +372,22 @@ export function ChatClient({
     }, {});
   }, [steps]);
 
+  const artifactsByMessage = useMemo(() => {
+    return artifacts.reduce<Record<string, ReportArtifact[]>>((acc, artifact) => {
+      acc[artifact.message_id] = [...(acc[artifact.message_id] ?? []), artifact].sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
+      return acc;
+    }, {});
+  }, [artifacts]);
+
   async function sendMessage() {
     if (!selectedChatId || !input.trim()) {
+      return;
+    }
+
+    if (balance <= 0) {
+      window.location.href = "/paywall";
       return;
     }
 
@@ -337,7 +403,11 @@ export function ChatClient({
     });
 
     if (!response.ok || !response.body) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      const payload = (await response.json().catch(() => null)) as { error?: string; redirectTo?: string } | null;
+      if (response.status === 402 && payload?.redirectTo) {
+        window.location.href = payload.redirectTo;
+        return;
+      }
       setError(payload?.error ?? "Message send failed.");
       setIsStreaming(false);
       return;
@@ -371,6 +441,14 @@ export function ChatClient({
           messageId?: string;
           chunk?: string;
           error?: string;
+          id?: string;
+          message_id?: string;
+          title?: string;
+          storage_path?: string;
+          signed_url?: string;
+          created_at?: string;
+          expires_at?: string;
+          balance?: number;
         };
 
         if (event === "message" && data.userMessage && data.assistantMessage) {
@@ -380,6 +458,32 @@ export function ChatClient({
 
         if (event === "step") {
           setSteps((current) => [...current, data as unknown as AgentStep]);
+        }
+
+        if (
+          event === "artifact" &&
+          typeof data.id === "string" &&
+          typeof data.message_id === "string" &&
+          typeof data.title === "string" &&
+          typeof data.storage_path === "string" &&
+          typeof data.signed_url === "string" &&
+          typeof data.created_at === "string" &&
+          typeof data.expires_at === "string"
+        ) {
+          const artifact: ReportArtifact = {
+            id: data.id,
+            message_id: data.message_id,
+            title: data.title,
+            storage_path: data.storage_path,
+            signed_url: data.signed_url,
+            created_at: data.created_at,
+            expires_at: data.expires_at,
+          };
+
+          setArtifacts((current) => [
+            ...current.filter((item) => item.id !== artifact.id),
+            artifact,
+          ]);
         }
 
         if (event === "content" && data.messageId && data.chunk) {
@@ -392,6 +496,10 @@ export function ChatClient({
 
         if (event === "error") {
           setError(data.error ?? "Agent failed.");
+        }
+
+        if (event === "credit" && typeof data.balance === "number") {
+          setBalance(data.balance);
         }
       }
     }
@@ -409,9 +517,17 @@ export function ChatClient({
           </div>
           <div>
             <p className="font-semibold">MicroManus</p>
-            <p className="text-xs text-muted-foreground">{balance} credits</p>
+            <p className={`text-xs ${balance <= 1 ? "font-medium text-amber-700" : "text-muted-foreground"}`}>
+              {balance === 1 ? "1 credit left" : `${balance} credits`}
+            </p>
           </div>
         </div>
+
+        {balance <= 1 ? (
+          <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+            {balance <= 0 ? "No credits left. Buy credits to send another message." : "Low balance. Your next message will use your last credit."}
+          </div>
+        ) : null}
 
         <Button asChild className="mb-3 w-full">
           <Link href="/app">
@@ -423,6 +539,18 @@ export function ChatClient({
           <Link href="/app/settings/keys">
             <Settings aria-hidden="true" />
             Settings
+          </Link>
+        </Button>
+        <Button asChild className="mb-3 w-full" variant="outline">
+          <Link href="/app/stats">
+            <BarChart3 aria-hidden="true" />
+            Stats
+          </Link>
+        </Button>
+        <Button asChild className="mb-5 w-full" variant={balance <= 1 ? "default" : "outline"}>
+          <Link href="/paywall">
+            <CreditCard aria-hidden="true" />
+            Buy credits
           </Link>
         </Button>
 
@@ -473,6 +601,11 @@ export function ChatClient({
                       className="prose prose-sm max-w-none"
                       dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content || (message.role === "assistant" && isStreaming ? "Thinking..." : "")) }}
                     />
+                    {message.role === "assistant"
+                      ? (artifactsByMessage[message.id] ?? []).map((artifact) => (
+                          <ArtifactCard key={artifact.id} artifact={artifact} />
+                        ))
+                      : null}
                     {message.role === "assistant" ? <Trace steps={stepsByMessage[message.id] ?? []} /> : null}
                   </div>
                 ))
@@ -495,13 +628,18 @@ export function ChatClient({
                   }
                 }}
                 placeholder="Ask MicroManus to research something..."
-                disabled={isStreaming}
+                disabled={isStreaming || balance <= 0}
               />
               <Button disabled={isStreaming || !input.trim()} onClick={sendMessage}>
                 {isStreaming ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
                 Send
               </Button>
             </div>
+            {balance <= 0 ? (
+              <div className="mx-auto mt-2 max-w-3xl text-sm text-amber-700">
+                You need credits to send a message. Opening the paywall from Send will take you to checkout.
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
