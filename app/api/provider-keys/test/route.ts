@@ -4,13 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getDefaultBaseUrl, type ProviderId } from "@/lib/models";
 
 const PROVIDERS = new Set<ProviderId>(["openai", "anthropic", "kimi", "openai_compatible"]);
+const TEST_TIMEOUT_MS = 15_000;
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
 async function testOpenAiCompatible(apiKey: string, baseUrl: string) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, "")}/models`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
       Accept: "application/json",
@@ -18,13 +19,12 @@ async function testOpenAiCompatible(apiKey: string, baseUrl: string) {
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(body.slice(0, 240) || `HTTP ${response.status}`);
+    throw new Error(testErrorForStatus(response.status));
   }
 }
 
 async function testAnthropic(apiKey: string) {
-  const response = await fetch("https://api.anthropic.com/v1/models?limit=1", {
+  const response = await fetchWithTimeout("https://api.anthropic.com/v1/models?limit=1", {
     headers: {
       "anthropic-version": "2023-06-01",
       "x-api-key": apiKey,
@@ -33,9 +33,41 @@ async function testAnthropic(apiKey: string) {
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(body.slice(0, 240) || `HTTP ${response.status}`);
+    throw new Error(testErrorForStatus(response.status));
   }
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Connection test timed out.");
+    }
+
+    throw new Error("Provider could not be reached.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function testErrorForStatus(status: number) {
+  if (status === 401 || status === 403) {
+    return "Provider rejected this API key or project.";
+  }
+
+  if (status === 429) {
+    return "Provider rate-limited the connection test.";
+  }
+
+  if (status >= 500) {
+    return "Provider is temporarily unavailable.";
+  }
+
+  return `Connection test failed with HTTP ${status}.`;
 }
 
 export async function POST(request: Request) {
