@@ -8,15 +8,25 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { InterfaceNotice } from "@/components/interface-notice";
+import { resolveAppReturnTo } from "@/lib/app-return-to";
 import { CREDIT_UNLOCK_AMOUNT, STRIPE_UNLOCK_PRICE_DISPLAY } from "@/lib/credits";
 import { parseJsonResponse } from "@/lib/http";
+import { cn } from "@/lib/utils";
 
-type PaywallClientProps = {
-  paymentCancelled: boolean;
-  paymentSuccess: boolean;
+export type PaywallClientProps = {
+  embedded?: boolean;
+  paymentCancelled?: boolean;
+  paymentSuccess?: boolean;
+  returnTo?: string;
 };
 
-export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClientProps) {
+export function PaywallClient({
+  embedded = false,
+  paymentCancelled = false,
+  paymentSuccess = false,
+  returnTo = "/app",
+}: PaywallClientProps) {
+  const safeReturnTo = resolveAppReturnTo(returnTo);
   const [couponState, couponAction, isRedeeming] = useActionState(redeemCoupon, {});
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -37,15 +47,23 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
       attempts += 1;
 
       try {
-        const response = await fetch("/api/wallet", { cache: "no-store" });
+        const stripeSessionId = new URLSearchParams(window.location.search).get("stripe_session_id");
+        const walletUrl = new URL("/api/wallet", window.location.origin);
+        if (stripeSessionId) {
+          walletUrl.searchParams.set("stripeSessionId", stripeSessionId);
+        }
+        const response = await fetch(walletUrl, { cache: "no-store" });
         if (!response.ok) {
           throw new Error("Wallet polling failed.");
         }
 
-        const data = await parseJsonResponse<{ balance?: number }>(response);
+        const data = await parseJsonResponse<{ balance?: number; checkoutFulfilled?: boolean }>(response);
+        const checkoutIsReady = stripeSessionId
+          ? data?.checkoutFulfilled === true
+          : typeof data?.balance === "number" && data.balance > 0;
 
-        if (!cancelled && typeof data?.balance === "number" && data.balance > 0) {
-          window.location.assign("/app");
+        if (!cancelled && checkoutIsReady) {
+          window.location.assign(safeReturnTo);
           return;
         }
       } catch {
@@ -67,7 +85,7 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
     return () => {
       cancelled = true;
     };
-  }, [paymentSuccess]);
+  }, [paymentSuccess, safeReturnTo]);
 
   async function startCheckout() {
     setIsStartingCheckout(true);
@@ -75,6 +93,8 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
 
     try {
       const response = await fetch("/api/stripe/create-checkout-session", {
+        body: JSON.stringify({ returnTo: safeReturnTo }),
+        headers: { "Content-Type": "application/json" },
         method: "POST",
       });
 
@@ -102,8 +122,20 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
   }
 
   return (
-    <div className="grid border border-ink/20 md:grid-cols-2">
-      <Card className="rounded-none border-0 border-b border-ink/20 bg-paper-surface md:border-b-0 md:border-r">
+    <div
+      className={cn(
+        "grid",
+        embedded ? "gap-4 xl:grid-cols-2" : "border border-ink/20 md:grid-cols-2",
+      )}
+    >
+      <Card
+        className={cn(
+          "rounded-none bg-paper-surface",
+          embedded
+            ? "border border-ink/20"
+            : "border-0 border-b border-ink/20 md:border-b-0 md:border-r",
+        )}
+      >
         <CardHeader className="pb-4">
           <p className="utility-label">
             Option <span className="font-mono">01</span>
@@ -116,6 +148,7 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
         </CardHeader>
         <CardContent>
           <form action={couponAction} className="space-y-3">
+            <input name="returnTo" type="hidden" value={safeReturnTo} />
             <Input
               aria-label="Coupon code"
               autoCapitalize="characters"
@@ -135,7 +168,7 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
         </CardContent>
       </Card>
 
-      <Card className="rounded-none border-0 bg-paper-surface">
+      <Card className={cn("rounded-none bg-paper-surface", embedded ? "border border-ink/20" : "border-0")}>
         <CardHeader className="pb-4">
           <p className="utility-label">
             Option <span className="font-mono">02</span>
