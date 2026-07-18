@@ -27,6 +27,7 @@ import { getModelsForProvider, type ProviderId } from "@/lib/models";
 type ProviderKey = {
   id: string;
   provider: ProviderId;
+  api_format: "openai" | "anthropic" | "google";
   label: string;
   base_url: string | null;
   key_last4: string;
