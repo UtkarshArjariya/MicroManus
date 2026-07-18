@@ -1,5 +1,8 @@
 import "server-only";
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+
 import { renderPdfReport, type PdfReportSection } from "@/lib/agent/report-pdf";
 import {
   REPORT_ARTIFACTS_BUCKET,
@@ -14,11 +17,20 @@ type SearchResult = {
   snippet: string;
 };
 
+const MAX_WEB_SEARCHES_PER_TURN = 8;
+const MAX_PAGE_FETCHES_PER_TURN = 10;
+const TOOL_TIMEOUT_MS = 15_000;
+const MAX_FETCH_CONTENT_LENGTH = 2_000_000;
+
 export type ToolRunContext = {
   chatId: string;
   messageId: string;
   discoveredSources: Set<string>;
   visitedSources: Set<string>;
+  toolUsage: {
+    webSearches: number;
+    pageFetches: number;
+  };
 };
 
 type GeneratePdfReportInput = {
@@ -49,6 +61,16 @@ function stripHtml(html: string) {
       .trim(),
     12_000,
   );
+}
+
+function timeoutSignal() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS);
+
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timeout),
+  };
 }
 
 export const openAiTools = [
@@ -212,6 +234,11 @@ export const anthropicTools = [
 
 export async function runTool(name: string, input: unknown, context: ToolRunContext) {
   if (name === "web_search") {
+    context.toolUsage.webSearches += 1;
+    if (context.toolUsage.webSearches > MAX_WEB_SEARCHES_PER_TURN) {
+      return { error: `Search limit reached for this turn (${MAX_WEB_SEARCHES_PER_TURN}). Continue with the sources already found.` };
+    }
+
     const query = typeof input === "object" && input !== null && "query" in input
       ? String((input as { query?: unknown }).query ?? "")
       : "";
@@ -221,6 +248,11 @@ export async function runTool(name: string, input: unknown, context: ToolRunCont
   }
 
   if (name === "fetch_page") {
+    context.toolUsage.pageFetches += 1;
+    if (context.toolUsage.pageFetches > MAX_PAGE_FETCHES_PER_TURN) {
+      return { error: `Page fetch limit reached for this turn (${MAX_PAGE_FETCHES_PER_TURN}). Continue with the pages already read.` };
+    }
+
     const url = typeof input === "object" && input !== null && "url" in input
       ? String((input as { url?: unknown }).url ?? "")
       : "";
@@ -345,6 +377,84 @@ function normalizeUrl(url: string) {
   }
 }
 
+function isPrivateIpv4(address: string) {
+  const parts = address.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part))) {
+    return true;
+  }
+
+  const [a, b] = parts;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
+}
+
+function isPrivateIpv6(address: string) {
+  const normalized = address.toLowerCase();
+  return (
+    normalized === "::" ||
+    normalized === "::1" ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("fe80:")
+  );
+}
+
+function isBlockedIp(address: string) {
+  const version = isIP(address);
+  if (version === 4) {
+    return isPrivateIpv4(address);
+  }
+
+  if (version === 6) {
+    return isPrivateIpv6(address);
+  }
+
+  return true;
+}
+
+async function validatePublicHttpUrl(url: string): Promise<URL | { error: string }> {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { error: "Invalid URL." };
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return { error: "Only HTTP and HTTPS URLs can be fetched." };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    return { error: "Local URLs cannot be fetched." };
+  }
+
+  if (isIP(hostname)) {
+    return isBlockedIp(hostname) ? { error: "Private or local network URLs cannot be fetched." } : parsed;
+  }
+
+  try {
+    const records = await lookup(hostname, { all: true, verbatim: true });
+    if (records.length === 0 || records.some((record) => isBlockedIp(record.address))) {
+      return { error: "Private or local network URLs cannot be fetched." };
+    }
+  } catch {
+    return { error: "Could not resolve URL host." };
+  }
+
+  return parsed;
+}
+
 function dedupeUrls(urls: string[]) {
   return [...new Set(urls.map((url) => normalizeUrl(url)).filter((url): url is string => Boolean(url)))];
 }
@@ -404,72 +514,78 @@ function parseGeneratePdfReportInput(input: unknown): GeneratePdfReportInput | {
 }
 
 async function generatePdfReport(input: unknown, context: ToolRunContext) {
-  const parsed = parseGeneratePdfReportInput(input);
-  if ("error" in parsed) {
-    return { error: parsed.error };
-  }
+  try {
+    const parsed = parseGeneratePdfReportInput(input);
+    if ("error" in parsed) {
+      return { error: parsed.error };
+    }
 
-  const knownSources = new Set([...context.discoveredSources, ...context.visitedSources]);
-  const requestedSources = dedupeUrls(parsed.sources).filter((source) => knownSources.has(source));
-  const sources = dedupeUrls([...context.visitedSources, ...requestedSources]);
-  const artifactId = crypto.randomUUID();
-  const createdAt = new Date();
-  const storagePath = `${context.chatId}/${context.messageId}/${artifactId}.pdf`;
-  const pdfBuffer = await renderPdfReport({
-    title: parsed.title,
-    generatedAt: createdAt,
-    sections: parsed.sections,
-    sources,
-  });
-  const admin = createAdminClient();
-
-  const { error: uploadError } = await admin.storage
-    .from(REPORT_ARTIFACTS_BUCKET)
-    .upload(storagePath, pdfBuffer, {
-      cacheControl: "3600",
-      contentType: "application/pdf",
-      upsert: false,
-    });
-
-  if (uploadError) {
-    return { error: `PDF upload failed: ${uploadError.message}` };
-  }
-
-  const { data: artifact, error: insertError } = await admin
-    .from("report_artifacts")
-    .insert({
-      id: artifactId,
-      chat_id: context.chatId,
-      message_id: context.messageId,
+    const knownSources = new Set([...context.discoveredSources, ...context.visitedSources]);
+    const requestedSources = dedupeUrls(parsed.sources).filter((source) => knownSources.has(source));
+    const sources = dedupeUrls([...context.visitedSources, ...requestedSources]);
+    const artifactId = crypto.randomUUID();
+    const createdAt = new Date();
+    const storagePath = `${context.chatId}/${context.messageId}/${artifactId}.pdf`;
+    const pdfBuffer = await renderPdfReport({
       title: parsed.title,
-      storage_path: storagePath,
-      created_at: createdAt.toISOString(),
-    })
-    .select("id, message_id, title, storage_path, created_at")
-    .single();
+      generatedAt: createdAt,
+      sections: parsed.sections,
+      sources,
+    });
+    const admin = createAdminClient();
 
-  if (insertError || !artifact) {
-    await admin.storage.from(REPORT_ARTIFACTS_BUCKET).remove([storagePath]);
-    return { error: `Report metadata insert failed: ${insertError?.message ?? "Unknown error"}` };
+    const { error: uploadError } = await admin.storage
+      .from(REPORT_ARTIFACTS_BUCKET)
+      .upload(storagePath, pdfBuffer, {
+        cacheControl: "3600",
+        contentType: "application/pdf",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      return { error: `PDF upload failed: ${uploadError.message}` };
+    }
+
+    const { data: artifact, error: insertError } = await admin
+      .from("report_artifacts")
+      .insert({
+        id: artifactId,
+        chat_id: context.chatId,
+        message_id: context.messageId,
+        title: parsed.title,
+        storage_path: storagePath,
+        created_at: createdAt.toISOString(),
+      })
+      .select("id, message_id, title, storage_path, created_at")
+      .single();
+
+    if (insertError || !artifact) {
+      await admin.storage.from(REPORT_ARTIFACTS_BUCKET).remove([storagePath]);
+      return { error: `Report metadata insert failed: ${insertError?.message ?? "Unknown error"}` };
+    }
+
+    const signedUrl = await createReportSignedUrl(storagePath, parsed.title);
+    const expiresAt = new Date(Date.now() + REPORT_SIGNED_URL_TTL_SECONDS * 1000).toISOString();
+
+    return {
+      ok: true,
+      title: parsed.title,
+      artifact: {
+        id: artifact.id,
+        message_id: artifact.message_id,
+        title: artifact.title,
+        storage_path: artifact.storage_path,
+        created_at: artifact.created_at,
+        signed_url: signedUrl,
+        expires_at: expiresAt,
+      },
+      sources,
+    };
+  } catch (error) {
+    return {
+      error: `Report generation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+    };
   }
-
-  const signedUrl = await createReportSignedUrl(storagePath, parsed.title);
-  const expiresAt = new Date(Date.now() + REPORT_SIGNED_URL_TTL_SECONDS * 1000).toISOString();
-
-  return {
-    ok: true,
-    title: parsed.title,
-    artifact: {
-      id: artifact.id,
-      message_id: artifact.message_id,
-      title: artifact.title,
-      storage_path: artifact.storage_path,
-      created_at: artifact.created_at,
-      signed_url: signedUrl,
-      expires_at: expiresAt,
-    },
-    sources,
-  };
 }
 
 async function webSearch(query: string): Promise<{ results?: SearchResult[]; error?: string }> {
@@ -483,16 +599,30 @@ async function webSearch(query: string): Promise<{ results?: SearchResult[]; err
   }
 
   const url = new URL("https://api.search.brave.com/res/v1/web/search");
-  url.searchParams.set("q", query);
+  url.searchParams.set("q", query.trim().slice(0, 300));
   url.searchParams.set("count", "5");
   url.searchParams.set("safesearch", "moderate");
 
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "X-Subscription-Token": apiKey,
-    },
-  });
+  const timeout = timeoutSignal();
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      signal: timeout.signal,
+      headers: {
+        Accept: "application/json",
+        "X-Subscription-Token": apiKey,
+      },
+    });
+  } catch (error) {
+    return {
+      error: error instanceof Error && error.name === "AbortError"
+        ? "Brave Search timed out. Try again in a moment."
+        : "Brave Search could not be reached.",
+    };
+  } finally {
+    timeout.clear();
+  }
 
   if (!response.ok) {
     return { error: `Brave Search failed with HTTP ${response.status}.` };
@@ -518,34 +648,47 @@ async function webSearch(query: string): Promise<{ results?: SearchResult[]; err
 }
 
 async function fetchPage(url: string): Promise<{ url?: string; text?: string; error?: string }> {
-  let parsed: URL;
+  const validated = await validatePublicHttpUrl(url.trim());
+  if ("error" in validated) {
+    return { error: validated.error };
+  }
+
+  const timeout = timeoutSignal();
+  let response: Response;
 
   try {
-    parsed = new URL(url);
-  } catch {
-    return { error: "Invalid URL." };
+    response = await fetch(validated, {
+      signal: timeout.signal,
+      headers: {
+        Accept: "text/html, text/plain;q=0.9, */*;q=0.8",
+        "User-Agent": "MicroManus/0.1 research-agent",
+      },
+    });
+  } catch (error) {
+    return {
+      url,
+      error: error instanceof Error && error.name === "AbortError"
+        ? "Fetch timed out."
+        : "Fetch failed before a response was received.",
+    };
+  } finally {
+    timeout.clear();
   }
-
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    return { error: "Only HTTP and HTTPS URLs can be fetched." };
-  }
-
-  const response = await fetch(parsed, {
-    headers: {
-      Accept: "text/html, text/plain;q=0.9, */*;q=0.8",
-      "User-Agent": "MicroManus/0.1 research-agent",
-    },
-  });
 
   if (!response.ok) {
     return { url, error: `Fetch failed with HTTP ${response.status}.` };
+  }
+
+  const contentLength = Number(response.headers.get("content-length") ?? "0");
+  if (contentLength > MAX_FETCH_CONTENT_LENGTH) {
+    return { url, error: "Page is too large to fetch safely." };
   }
 
   const contentType = response.headers.get("content-type") ?? "";
   const body = await response.text();
 
   return {
-    url,
+    url: validated.toString(),
     text: contentType.includes("html") ? stripHtml(body) : capText(body.replace(/\s+/g, " ").trim(), 12_000),
   };
 }
