@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { runAgent, type PersistStepInput } from "@/lib/agent";
-import type { ChatMessage } from "@/lib/agent/providers";
+import { ProviderRequestError, type ChatMessage } from "@/lib/agent/providers";
 import { calculateUsageCost } from "@/lib/cost";
 import { decrypt } from "@/lib/crypto";
 import type { ProviderId } from "@/lib/models";
+import { jsonInternalError, logServerError } from "@/lib/server-errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -30,6 +31,10 @@ function paywallResponse() {
 }
 
 function friendlyAgentError(error: unknown) {
+  if (error instanceof ProviderRequestError) {
+    return error.message;
+  }
+
   if (error instanceof Error) {
     if (error.message.includes("insufficient_credits")) {
       return "You do not have enough credits for that turn. Add credits and try again.";
@@ -38,8 +43,6 @@ function friendlyAgentError(error: unknown) {
     if (error.message.includes("fetch failed")) {
       return "A network request failed while the agent was working. Retry in a moment.";
     }
-
-    return error.message;
   }
 
   return "Agent run failed. Retry in a moment.";
@@ -81,6 +84,15 @@ export async function POST(
   { params }: { params: Promise<{ chatId: string }> },
 ) {
   const { chatId } = await params;
+  try {
+    return await handlePost(request, chatId);
+  } catch (error) {
+    logServerError("api/chats/message", error, { chatId });
+    return jsonInternalError("Message send failed. Try again.");
+  }
+}
+
+async function handlePost(request: Request, chatId: string) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -113,6 +125,9 @@ export async function POST(
     .maybeSingle();
 
   if (chatError || !chat) {
+    if (chatError) {
+      logServerError("api/chats/message.chat", chatError, { chatId, userId: user.id });
+    }
     return NextResponse.json({ error: "Chat not found." }, { status: 404 });
   }
 
@@ -131,6 +146,9 @@ export async function POST(
     .maybeSingle();
 
   if (keyError || !providerKey) {
+    if (keyError) {
+      logServerError("api/chats/message.provider-key", keyError, { chatId, userId: user.id });
+    }
     return NextResponse.json({ error: "Provider key not found." }, { status: 404 });
   }
 
@@ -141,6 +159,7 @@ export async function POST(
     .maybeSingle();
 
   if (walletError) {
+    logServerError("api/chats/message.wallet", walletError, { chatId, userId: user.id });
     return NextResponse.json({ error: "Could not check credit balance." }, { status: 500 });
   }
 
@@ -289,6 +308,11 @@ export async function POST(
 
         send("done", { messageId: assistantMessage.id });
       } catch (error) {
+        logServerError("api/chats/message.stream", error, {
+          chatId,
+          userId: user.id,
+          assistantMessageId,
+        });
         const message = friendlyAgentError(error);
         if (assistantMessageId) {
           await admin
