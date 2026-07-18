@@ -1,10 +1,30 @@
 import type { Metadata } from "next";
+import { Fraunces, IBM_Plex_Mono, Inter } from "next/font/google";
 
 import "./globals.css";
 
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-fraunces",
+  display: "swap",
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-plex-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "MicroManus",
-  description: "Usage-based deep-research AI agent workspace.",
+  description: "Deep research with a source trail and running cost ledger.",
 };
 
 export default function RootLayout({
@@ -14,7 +34,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className={`${fraunces.variable} ${inter.variable} ${plexMono.variable}`}>
+        {children}
+      </body>
     </html>
   );
 }
