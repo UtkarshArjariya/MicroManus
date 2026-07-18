@@ -1,7 +1,8 @@
-import { Search } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { PaywallClient } from "@/app/paywall/paywall-client";
+import { CreditStamp } from "@/components/credit-stamp";
+import { Wordmark } from "@/components/wordmark";
 import { createClient } from "@/lib/supabase/server";
 
 type PaywallPageProps = {
@@ -28,32 +29,36 @@ export default async function PaywallPage({ searchParams }: PaywallPageProps) {
   const params = await searchParams;
   const paymentSuccess = params.stripe === "success";
   const paymentCancelled = params.stripe === "cancelled";
+  const balance = wallet?.balance ?? 0;
 
-  if ((wallet?.balance ?? 0) > 0 && !paymentSuccess) {
+  if (balance > 0 && !paymentSuccess) {
     redirect("/app");
   }
 
   return (
-    <main className="min-h-screen bg-stone-50 px-4 py-8">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-        <header className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Search aria-hidden="true" className="h-5 w-5" />
-          </div>
+    <main className="min-h-screen bg-paper px-5 py-7 sm:px-8 sm:py-10">
+      <div className="mx-auto w-full max-w-5xl">
+        <header className="flex items-center justify-between border-b border-ink/20 pb-6">
           <div>
-            <p className="text-xl font-semibold">MicroManus</p>
-            <p className="text-sm text-muted-foreground">Add credits to unlock the research workspace.</p>
+            <Wordmark href="/app" />
+            <p className="mt-2 text-sm text-ink-muted">Research access desk</p>
           </div>
+          <CreditStamp balance={balance} />
         </header>
 
-        <section className="space-y-3">
+        <section className="py-9 sm:py-12">
           <div className="max-w-2xl">
-            <h1 className="text-3xl font-semibold tracking-normal">Unlock your first research credits</h1>
-            <p className="mt-2 text-muted-foreground">
-              New accounts start at 0 credits. Redeem the launch coupon or use Stripe Checkout to add 5 credits.
+            <p className="utility-label">Access clearance</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">
+              Add credits to open the desk
+            </h1>
+            <p className="mt-4 max-w-xl text-base leading-7 text-ink-muted">
+              Redeem the launch code or pay by card. Either option adds five research credits to your account.
             </p>
           </div>
-          <PaywallClient paymentCancelled={paymentCancelled} paymentSuccess={paymentSuccess} />
+          <div className="mt-8">
+            <PaywallClient paymentCancelled={paymentCancelled} paymentSuccess={paymentSuccess} />
+          </div>
         </section>
       </div>
     </main>
