@@ -140,7 +140,7 @@ async function handlePost(request: Request, chatId: string) {
 
   const { data: providerKey, error: keyError } = await admin
     .from("provider_keys")
-    .select("provider, base_url, encrypted_key")
+    .select("provider, api_format, base_url, encrypted_key")
     .eq("id", chat.provider_key_id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -234,6 +234,7 @@ async function handlePost(request: Request, chatId: string) {
         const finalAnswer = await runAgent({
           credentials: {
             provider: providerKey.provider as ProviderId,
+            apiFormat: providerKey.api_format,
             apiKey: decrypt(providerKey.encrypted_key),
             baseUrl: providerKey.base_url,
             model: chat.model,
