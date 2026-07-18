@@ -35,8 +35,18 @@ export async function AppShell({ selectedChatId }: { selectedChatId: string | nu
 
   const balance = wallet?.balance ?? 0;
 
+  const chatIds = (chats ?? []).map((chat) => chat.id);
+  const { data: chatArtifacts = [] } = chatIds.length > 0
+    ? await supabase.from("report_artifacts").select("chat_id").in("chat_id", chatIds)
+    : { data: [] };
+  const reportChatIds = new Set((chatArtifacts ?? []).map((artifact) => artifact.chat_id));
+  const chatsWithReports = (chats ?? []).map((chat) => ({
+    ...chat,
+    has_report: reportChatIds.has(chat.id),
+  }));
+
   const selectedChat = selectedChatId
-    ? chats?.find((chat) => chat.id === selectedChatId)
+    ? chatsWithReports.find((chat) => chat.id === selectedChatId)
     : null;
 
   if (selectedChatId && !selectedChat) {
@@ -85,7 +95,7 @@ export async function AppShell({ selectedChatId }: { selectedChatId: string | nu
   return (
     <ChatClient
       selectedChatId={selectedChatId}
-      chats={chats ?? []}
+      chats={chatsWithReports}
       keys={keys ?? []}
       messages={messages}
       steps={steps}
