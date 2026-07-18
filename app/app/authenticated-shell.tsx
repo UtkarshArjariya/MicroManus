@@ -5,17 +5,22 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
+  Check,
   ChevronUp,
   CreditCard,
   KeyRound,
   LogOut,
   Menu,
+  Monitor,
+  Moon,
   Palette,
   Plus,
   Settings,
+  Sun,
   UserRound,
   X,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 
 import { signOut } from "@/app/app/actions";
 import { KeysClient } from "@/app/app/settings/keys/keys-client";
@@ -90,7 +95,7 @@ function initials(name: string, email: string) {
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(value));
 }
 
 const settingsTabs: Array<{ id: SettingsTab; label: string; icon: typeof UserRound }> = [
@@ -112,6 +117,12 @@ function AccountControl({
   user: WorkspaceUser;
 }) {
   const fallback = initials(user.name, user.email);
+  const { setTheme, theme } = useTheme();
+  const quickThemes = [
+    { icon: Sun, label: "Light", value: "light" },
+    { icon: Moon, label: "Dark", value: "dark" },
+    { icon: Monitor, label: "System", value: "system" },
+  ] as const;
 
   return (
     <DropdownMenu>
@@ -150,10 +161,23 @@ function AccountControl({
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <div className="px-2 py-2">
-          <p className="utility-label mb-2">Quick theme</p>
-          <ThemeToggle />
-        </div>
+        <DropdownMenuLabel className="pb-1 pt-2">
+          <span className="utility-label">Quick theme</span>
+        </DropdownMenuLabel>
+        {quickThemes.map(({ icon: Icon, label, value }) => (
+          <DropdownMenuItem
+            aria-label={`Use ${label.toLowerCase()} theme`}
+            key={value}
+            onSelect={(event) => {
+              event.preventDefault();
+              setTheme(value);
+            }}
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+            <span className="flex-1">{label}</span>
+            {theme === value ? <Check className="h-4 w-4 text-pine" aria-label="Selected" /> : null}
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => onOpenSettings("profile")}>
           <Settings className="h-4 w-4" aria-hidden="true" />
@@ -213,15 +237,13 @@ function SettingsDialog({
         </div>
 
         <div className="grid max-h-[calc(90dvh-7.75rem)] min-h-[28rem] overflow-hidden md:grid-cols-[13rem_minmax(0,1fr)]">
-          <div
+          <nav
             aria-label="Settings sections"
             className="flex gap-1 overflow-x-auto border-b border-ink/15 bg-paper-deep/35 p-3 md:flex-col md:border-b-0 md:border-r md:p-4"
-            role="tablist"
           >
             {settingsTabs.map(({ id, label, icon: Icon }) => (
               <button
-                aria-controls={`settings-panel-${id}`}
-                aria-selected={tab === id}
+                aria-current={tab === id ? "page" : undefined}
                 className={cn(
                   "flex min-w-max items-center gap-2 border-l-2 px-3 py-2.5 text-left text-sm font-semibold text-ink-muted transition-colors hover:bg-paper-surface hover:text-ink md:w-full",
                   tab === id && "border-ochre bg-paper-surface text-ink",
@@ -230,18 +252,17 @@ function SettingsDialog({
                 id={`settings-tab-${id}`}
                 key={id}
                 onClick={() => setTab(id)}
-                role="tab"
                 type="button"
               >
                 <Icon className="h-4 w-4" aria-hidden="true" />
                 {label}
               </button>
             ))}
-          </div>
+          </nav>
 
           <div className="overflow-y-auto p-5 sm:p-7">
             {tab === "profile" ? (
-              <section aria-labelledby="settings-tab-profile" id="settings-panel-profile" role="tabpanel">
+              <section aria-labelledby="settings-tab-profile" id="settings-panel-profile">
                 <p className="utility-label">OAuth profile</p>
                 <h2 className="mt-2 text-2xl font-semibold">Your account</h2>
                 <div className="mt-6 flex items-center gap-4 border-y border-ink/15 py-5">
@@ -267,7 +288,7 @@ function SettingsDialog({
             ) : null}
 
             {tab === "appearance" ? (
-              <section aria-labelledby="settings-tab-appearance" id="settings-panel-appearance" role="tabpanel">
+              <section aria-labelledby="settings-tab-appearance" id="settings-panel-appearance">
                 <p className="utility-label">Display preference</p>
                 <h2 className="mt-2 text-2xl font-semibold">Appearance</h2>
                 <p className="mt-2 max-w-xl text-sm leading-6 text-ink-muted">
@@ -278,7 +299,7 @@ function SettingsDialog({
             ) : null}
 
             {tab === "api-keys" ? (
-              <section aria-labelledby="settings-tab-api-keys" id="settings-panel-api-keys" role="tabpanel">
+              <section aria-labelledby="settings-tab-api-keys" id="settings-panel-api-keys">
                 <p className="utility-label">Bring your own model</p>
                 <h2 className="mt-2 text-2xl font-semibold">API Keys</h2>
                 <p className="mt-2 text-sm leading-6 text-ink-muted">
@@ -291,7 +312,7 @@ function SettingsDialog({
             ) : null}
 
             {tab === "billing" ? (
-              <section aria-labelledby="settings-tab-billing" id="settings-panel-billing" role="tabpanel">
+              <section aria-labelledby="settings-tab-billing" id="settings-panel-billing">
                 <div className="flex items-start justify-between gap-5">
                   <div>
                     <p className="utility-label">Credits and payments</p>
@@ -413,7 +434,7 @@ export function AuthenticatedShell({
   return (
     <WorkspaceContext.Provider value={contextValue}>
       <main className="min-h-dvh bg-paper md:grid md:grid-cols-[17.5rem_minmax(0,1fr)]">
-        <aside className="border-b border-ink/20 bg-paper-deep/45 md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:border-b-0 md:border-r">
+        <aside className="sticky top-0 z-40 border-b border-ink/20 bg-paper-deep/95 backdrop-blur-sm md:flex md:h-dvh md:flex-col md:border-b-0 md:border-r md:bg-paper-deep/45 md:backdrop-blur-none">
           <div className="flex items-center justify-between gap-3 p-4 md:p-5">
             <Wordmark href="/app" />
             <div className="flex items-center gap-2 md:hidden">
