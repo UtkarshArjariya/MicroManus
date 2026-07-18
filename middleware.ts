@@ -57,7 +57,8 @@ export async function middleware(request: NextRequest) {
   if (!user && !isPublicPath(pathname)) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
-    loginUrl.searchParams.set("next", pathname);
+    loginUrl.search = "";
+    loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
     return redirectWithCookies(loginUrl, response);
   }
 
