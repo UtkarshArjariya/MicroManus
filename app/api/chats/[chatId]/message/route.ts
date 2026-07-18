@@ -45,7 +45,7 @@ function friendlyAgentError(error: unknown) {
     }
   }
 
-  return "Agent run failed. Retry in a moment.";
+  return "The agent couldn’t finish this turn. Check the provider key, then retry.";
 }
 
 async function appendMessage(chatId: string, role: MessageRole, content: string) {
@@ -88,7 +88,7 @@ export async function POST(
     return await handlePost(request, chatId);
   } catch (error) {
     logServerError("api/chats/message", error, { chatId });
-    return jsonInternalError("Message send failed. Try again.");
+    return jsonInternalError("The message didn’t send. Check your connection and try again.");
   }
 }
 
@@ -99,7 +99,7 @@ async function handlePost(request: Request, chatId: string) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Your session ended. Sign in again, then resend the message." }, { status: 401 });
   }
 
   const body = (await request.json().catch(() => null)) as { content?: string } | null;
@@ -160,7 +160,7 @@ async function handlePost(request: Request, chatId: string) {
 
   if (walletError) {
     logServerError("api/chats/message.wallet", walletError, { chatId, userId: user.id });
-    return NextResponse.json({ error: "Could not check credit balance." }, { status: 500 });
+    return NextResponse.json({ error: "We couldn’t check your credit balance. Refresh the page and try again." }, { status: 500 });
   }
 
   if ((wallet?.balance ?? 0) <= 0) {
