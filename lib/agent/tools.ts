@@ -22,6 +22,8 @@ const MAX_WEB_SEARCHES_PER_TURN = 8;
 const MAX_PAGE_FETCHES_PER_TURN = 10;
 const TOOL_TIMEOUT_MS = 15_000;
 const MAX_FETCH_CONTENT_LENGTH = 2_000_000;
+const MAX_PAGE_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 export type ToolRunContext = {
   chatId: string;
@@ -672,6 +674,84 @@ async function webSearch(query: string): Promise<{ results?: SearchResult[]; err
   };
 }
 
+async function fetchPublicPage(initialUrl: URL, signal: AbortSignal) {
+  let currentUrl = initialUrl;
+
+  for (let redirectCount = 0; redirectCount <= MAX_PAGE_REDIRECTS; redirectCount += 1) {
+    const response = await fetch(currentUrl, {
+      signal,
+      redirect: "manual",
+      headers: {
+        Accept: "text/html, text/plain;q=0.9, */*;q=0.8",
+        "User-Agent": "MicroManus/0.1 research-agent",
+      },
+    });
+
+    if (!REDIRECT_STATUSES.has(response.status)) {
+      return { response, url: currentUrl };
+    }
+
+    const location = response.headers.get("location");
+    if (!location) {
+      return { response, url: currentUrl };
+    }
+
+    if (redirectCount >= MAX_PAGE_REDIRECTS) {
+      await response.body?.cancel().catch(() => undefined);
+      return { error: `The source redirected more than ${MAX_PAGE_REDIRECTS} times. Try another source.` };
+    }
+
+    let redirectUrl: URL;
+    try {
+      redirectUrl = new URL(location, currentUrl);
+    } catch {
+      await response.body?.cancel().catch(() => undefined);
+      return { error: "The source redirected to an invalid address. Try another source." };
+    }
+
+    const validatedRedirect = await validatePublicHttpUrl(redirectUrl.toString());
+    await response.body?.cancel().catch(() => undefined);
+    if ("error" in validatedRedirect) {
+      return { error: "The source redirected to a private, local, or invalid address. Try another source." };
+    }
+
+    currentUrl = validatedRedirect;
+  }
+
+  return { error: "The source redirected too many times. Try another source." };
+}
+
+async function readResponseText(response: Response) {
+  if (!response.body) {
+    return { text: "" };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        text += decoder.decode();
+        return { text };
+      }
+
+      bytesRead += chunk.value.byteLength;
+      if (bytesRead > MAX_FETCH_CONTENT_LENGTH) {
+        await reader.cancel();
+        return { error: "Page is too large to fetch safely." };
+      }
+
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function fetchPage(url: string): Promise<{ url?: string; text?: string; error?: string }> {
   const validated = await validatePublicHttpUrl(url.trim());
   if ("error" in validated) {
@@ -679,16 +759,40 @@ async function fetchPage(url: string): Promise<{ url?: string; text?: string; er
   }
 
   const timeout = timeoutSignal();
-  let response: Response;
 
   try {
-    response = await fetch(validated, {
-      signal: timeout.signal,
-      headers: {
-        Accept: "text/html, text/plain;q=0.9, */*;q=0.8",
-        "User-Agent": "MicroManus/0.1 research-agent",
-      },
-    });
+    const fetched = await fetchPublicPage(validated, timeout.signal);
+    if ("error" in fetched) {
+      return { error: fetched.error };
+    }
+
+    const { response, url: finalUrl } = fetched;
+    if (!response.ok) {
+      logServerError("agent/fetch-page.response", new Error(`Page returned HTTP ${response.status}.`), {
+        status: response.status,
+        url: finalUrl.toString(),
+      });
+      return { url: finalUrl.toString(), error: "The source did not return a readable page. Try another source." };
+    }
+
+    const contentLength = Number(response.headers.get("content-length") ?? "0");
+    if (contentLength > MAX_FETCH_CONTENT_LENGTH) {
+      await response.body?.cancel().catch(() => undefined);
+      return { url: finalUrl.toString(), error: "Page is too large to fetch safely." };
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    const body = await readResponseText(response);
+    if ("error" in body) {
+      return { url: finalUrl.toString(), error: body.error };
+    }
+
+    return {
+      url: finalUrl.toString(),
+      text: contentType.includes("html")
+        ? stripHtml(body.text)
+        : capText(body.text.replace(/\s+/g, " ").trim(), 12_000),
+    };
   } catch (error) {
     logServerError("agent/fetch-page.fetch", error, { url: validated.toString() });
     return {
@@ -700,25 +804,4 @@ async function fetchPage(url: string): Promise<{ url?: string; text?: string; er
   } finally {
     timeout.clear();
   }
-
-  if (!response.ok) {
-    logServerError("agent/fetch-page.response", new Error(`Page returned HTTP ${response.status}.`), {
-      status: response.status,
-      url: validated.toString(),
-    });
-    return { url, error: "The source did not return a readable page. Try another source." };
-  }
-
-  const contentLength = Number(response.headers.get("content-length") ?? "0");
-  if (contentLength > MAX_FETCH_CONTENT_LENGTH) {
-    return { url, error: "Page is too large to fetch safely." };
-  }
-
-  const contentType = response.headers.get("content-type") ?? "";
-  const body = await response.text();
-
-  return {
-    url: validated.toString(),
-    text: contentType.includes("html") ? stripHtml(body) : capText(body.replace(/\s+/g, " ").trim(), 12_000),
-  };
 }
