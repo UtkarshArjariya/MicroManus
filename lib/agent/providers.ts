@@ -533,7 +533,9 @@ async function callOpenAiResponses(
   }
 
   const payload = await parseProviderJson<{
+    status?: string | null;
     error?: { message?: string } | null;
+    incomplete_details?: { reason?: string } | null;
     output_text?: string;
     output?: OpenAiResponsesItem[];
     usage?: {
@@ -553,6 +555,36 @@ async function callOpenAiResponses(
     });
     throw new ProviderRequestError(
       `${providerDisplayName(credentials.provider)} could not complete the request. Check the key, model, and provider settings.`,
+      502,
+    );
+  }
+
+  if (payload.status && payload.status !== "completed") {
+    const reason = payload.incomplete_details?.reason;
+    logServerError("agent/provider.incomplete", new Error(`Responses API status: ${payload.status}`), {
+      provider: credentials.provider,
+      apiFormat: "openai_responses",
+      responseStatus: payload.status,
+      incompleteReason: reason,
+    });
+
+    const name = providerDisplayName(credentials.provider);
+    if (payload.status === "incomplete" && reason === "max_output_tokens") {
+      throw new ProviderRequestError(
+        `${name} ran out of response space before finishing this step. Retry with a shorter request or switch models.`,
+        502,
+      );
+    }
+
+    if (payload.status === "incomplete" && reason === "content_filter") {
+      throw new ProviderRequestError(
+        `${name} stopped before completing this response. Revise the request and try again.`,
+        502,
+      );
+    }
+
+    throw new ProviderRequestError(
+      `${name} returned an incomplete response. Retry this turn in a moment.`,
       502,
     );
   }
