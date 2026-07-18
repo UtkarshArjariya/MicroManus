@@ -96,13 +96,15 @@ export async function POST(request: Request) {
 
     const siteUrl = getSiteUrl();
     const usesStandalonePaywall = returnTo === DEFAULT_APP_RETURN_TO;
-    const successPathWithStatus = usesStandalonePaywall
-      ? paywallCallbackPath("success", returnTo, CHECKOUT_SESSION_PLACEHOLDER)
-      : setAppReturnToSearchParam(
-          setAppReturnToSearchParam(returnTo, "stripe", "success"),
-          "stripe_session_id",
-          CHECKOUT_SESSION_PLACEHOLDER,
-        );
+    // Always relay successful checkouts through the public paywall route. A
+    // user can open Billing after spending their final credit; in that case an
+    // /app callback would be intercepted by the zero-balance middleware before
+    // the exact Stripe session can be verified and fulfilled.
+    const successPathWithStatus = paywallCallbackPath(
+      "success",
+      returnTo,
+      CHECKOUT_SESSION_PLACEHOLDER,
+    );
     const successPath = preserveStripePlaceholder(successPathWithStatus);
     const cancelPath = usesStandalonePaywall
       ? paywallCallbackPath("cancelled", returnTo)
