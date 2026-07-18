@@ -87,7 +87,7 @@ export async function runAgent(options: AgentRunOptions) {
     });
 
     if (response.toolCalls.length === 0) {
-      finalAnswer = response.content || "I could not produce an answer from the provider response.";
+      finalAnswer = response.content || "The provider returned no answer. Retry this turn or choose another model.";
       await options.onStep({
         type: "final_answer",
         toolOutput: { content: finalAnswer },
