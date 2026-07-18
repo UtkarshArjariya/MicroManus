@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowDownUp, CreditCard, MessageSquare, Wallet } from "lucide-react";
+import { ArrowDownUp, CreditCard, MessageSquare } from "lucide-react";
 
+import { CreditStamp } from "@/components/credit-stamp";
+import { isProviderId, ProviderMark } from "@/components/provider-mark";
+import { Wordmark } from "@/components/wordmark";
 import { calculateUsageCost } from "@/lib/cost";
 import type { ProviderId } from "@/lib/models";
 import { createClient } from "@/lib/supabase/server";
@@ -152,23 +155,9 @@ function sortLink(sort: string, currentSort: string, currentDir: string, selecte
 }
 
 function CostSplit({ cost }: { cost: MoneyBreakdown }) {
-  const total = cost.total || 1;
-  const inputPct = Math.max((cost.input / total) * 100, cost.input > 0 ? 4 : 0);
-  const outputPct = Math.max((cost.output / total) * 100, cost.output > 0 ? 4 : 0);
-  const cachedPct = Math.max(100 - inputPct - outputPct, cost.cached > 0 ? 4 : 0);
-
   return (
-    <div className="min-w-44">
-      <div className="flex h-2 overflow-hidden rounded-sm bg-muted">
-        <div className="bg-sky-500" style={{ width: `${inputPct}%` }} />
-        <div className="bg-emerald-500" style={{ width: `${outputPct}%` }} />
-        <div className="bg-amber-500" style={{ width: `${cachedPct}%` }} />
-      </div>
-      <div className="mt-1 grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
-        <span>In {formatMoney(cost.input)}</span>
-        <span>Out {formatMoney(cost.output)}</span>
-        <span>Cached {formatMoney(cost.cached)}</span>
-      </div>
+    <div className="mt-1 hidden whitespace-nowrap font-mono text-[0.62rem] leading-4 text-ink-muted xl:block">
+      in {formatMoney(cost.input)} · out {formatMoney(cost.output)} · cached {formatMoney(cost.cached)}
     </div>
   );
 }
@@ -295,113 +284,115 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
   const selectedMessages = selected ? messagesByChat.get(selected.id) ?? [] : [];
   const selectedUsage = selected ? usageByChat.get(selected.id) ?? [] : [];
   const selectedAssistantMessages = selectedMessages.filter((message) => message.role === "assistant");
+  const balance = wallet?.balance ?? 0;
 
   return (
-    <main className="min-h-screen bg-stone-50">
-      <div className="border-b bg-background">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4">
-          <div>
-            <p className="text-sm text-muted-foreground">MicroManus</p>
-            <h1 className="text-xl font-semibold">Stats and costs</h1>
-          </div>
-          <div className="flex gap-2">
-            <Link className="inline-flex h-10 items-center rounded-md border px-3 text-sm font-medium" href="/app">
-              <MessageSquare className="mr-2 h-4 w-4" aria-hidden="true" />
-              Chats
+    <main className="min-h-screen bg-paper px-5 py-6 sm:px-8 sm:py-8">
+      <div className="mx-auto max-w-7xl">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-ink/20 pb-5">
+          <Wordmark href="/app" />
+          <div className="flex flex-wrap gap-2">
+            <Link className="inline-flex h-10 items-center gap-2 border border-ink/40 px-3 text-sm font-semibold hover:bg-paper-surface" href="/app">
+              <MessageSquare className="h-4 w-4" aria-hidden="true" />Chats
             </Link>
-            <Link className="inline-flex h-10 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground" href="/paywall">
-              <CreditCard className="mr-2 h-4 w-4" aria-hidden="true" />
-              Buy credits
+            <Link className="inline-flex h-10 items-center gap-2 border border-ochre bg-ochre px-3 text-sm font-semibold hover:bg-ochre/85" href="/paywall">
+              <CreditCard className="h-4 w-4" aria-hidden="true" />Add credits
             </Link>
           </div>
-        </div>
-      </div>
+        </header>
 
-      <div className="mx-auto max-w-7xl space-y-6 px-5 py-6">
-        <section className="grid gap-3 md:grid-cols-4">
-          <div className="rounded-md border bg-background p-4">
-            <p className="text-sm text-muted-foreground">Total provider cost</p>
-            <p className="mt-2 text-2xl font-semibold">{formatMoney(totalCost.total)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {Object.entries(providerCosts).map(([provider, cost]) => `${provider} ${formatMoney(cost)}`).join(" · ") || "No usage yet"}
-            </p>
-          </div>
-          <div className="rounded-md border bg-background p-4">
-            <p className="text-sm text-muted-foreground">Credits used</p>
-            <p className="mt-2 text-2xl font-semibold">{formatNumber(totalCreditsUsed)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">One credit per completed agent turn</p>
-          </div>
-          <div className="rounded-md border bg-background p-4">
-            <p className="text-sm text-muted-foreground">Credits remaining</p>
-            <p className="mt-2 flex items-center text-2xl font-semibold">
-              <Wallet className="mr-2 h-5 w-5" aria-hidden="true" />
-              {formatNumber(wallet?.balance ?? 0)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">{(wallet?.balance ?? 0) <= 1 ? "Low balance" : "Available now"}</p>
-          </div>
-          <div className="rounded-md border bg-background p-4">
-            <p className="text-sm text-muted-foreground">Most-used model</p>
-            <p className="mt-2 truncate text-2xl font-semibold">{mostUsedModel}</p>
-            <p className="mt-1 text-xs text-muted-foreground">By total input and output tokens</p>
+        <section className="py-8 sm:py-10">
+          <p className="utility-label">Usage ledger</p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">Stats and costs</h1>
+
+          <div className="mt-8 grid grid-cols-2 border-y border-ink/25 md:grid-cols-[1fr_1fr_1.5fr_auto]">
+            <div className="border-b border-r border-ink/15 p-4 md:border-b-0 sm:p-5">
+              <p className="utility-label">Provider cost</p>
+              <p className="mt-2 font-mono text-2xl font-semibold sm:text-3xl">{formatMoney(totalCost.total)}</p>
+              <p className="mt-2 font-mono text-[0.68rem] leading-5 text-ink-muted">
+                {Object.entries(providerCosts).map(([provider, cost]) => `${provider} ${formatMoney(cost)}`).join(" · ") || "No provider usage recorded"}
+              </p>
+            </div>
+            <div className="border-b border-ink/15 p-4 md:border-b-0 md:border-r sm:p-5">
+              <p className="utility-label">Credits used</p>
+              <p className="mt-2 font-mono text-2xl font-semibold sm:text-3xl">{formatNumber(totalCreditsUsed)}</p>
+              <p className="mt-2 text-[0.68rem] leading-5 text-ink-muted">One per completed turn</p>
+            </div>
+            <div className="border-r border-ink/15 p-4 sm:p-5">
+              <p className="utility-label">Most-used model</p>
+              <p className="mt-2 truncate font-mono text-base font-semibold sm:text-xl">{mostUsedModel}</p>
+              <p className="mt-2 text-[0.68rem] leading-5 text-ink-muted">Ranked by input and output tokens</p>
+            </div>
+            <div className="flex items-center justify-center p-4 sm:px-7">
+              <CreditStamp balance={balance} />
+            </div>
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-md border bg-background">
-          <div className="flex items-center justify-between border-b px-4 py-3">
-            <h2 className="font-semibold">Chats</h2>
-            <div className="flex gap-2 text-sm">
-              <Link className="inline-flex items-center rounded-md border px-2 py-1" href={sortLink("date", currentSort, currentDir, selected?.id)}>
-                <ArrowDownUp className="mr-1 h-3 w-3" aria-hidden="true" />
-                Date
+        <section aria-labelledby="chat-ledger-heading">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/25 pb-3">
+            <div>
+              <p className="utility-label">Case ledger</p>
+              <h2 id="chat-ledger-heading" className="mt-1 text-2xl font-semibold">Chats</h2>
+            </div>
+            <div className="flex gap-2 text-xs">
+              <Link className="inline-flex items-center border border-ink/30 px-2 py-1.5 font-semibold hover:bg-paper-surface" href={sortLink("date", currentSort, currentDir, selected?.id)}>
+                <ArrowDownUp className="mr-1 h-3 w-3" aria-hidden="true" />Date
               </Link>
-              <Link className="inline-flex items-center rounded-md border px-2 py-1" href={sortLink("cost", currentSort, currentDir, selected?.id)}>
-                <ArrowDownUp className="mr-1 h-3 w-3" aria-hidden="true" />
-                Cost
+              <Link className="inline-flex items-center border border-ink/30 px-2 py-1.5 font-semibold hover:bg-paper-surface" href={sortLink("cost", currentSort, currentDir, selected?.id)}>
+                <ArrowDownUp className="mr-1 h-3 w-3" aria-hidden="true" />Cost
               </Link>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+          <div>
+            <table className="w-full table-fixed border-collapse text-left text-xs md:table-auto">
+              <thead className="bg-paper-deep/55 text-[0.62rem] uppercase tracking-[0.13em] text-ink-muted">
                 <tr>
-                  <th className="px-4 py-3">Title</th>
-                  <th className="px-4 py-3">Provider / model</th>
-                  <th className="px-4 py-3">Messages</th>
-                  <th className="px-4 py-3">Input</th>
-                  <th className="px-4 py-3">Output</th>
-                  <th className="px-4 py-3">Cached</th>
-                  <th className="px-4 py-3">Cost</th>
-                  <th className="px-4 py-3">Credits</th>
-                  <th className="px-4 py-3">Created</th>
+                  <th className="w-[58%] px-3 py-3 font-semibold md:w-auto">Chat</th>
+                  <th className="hidden px-3 py-3 font-semibold sm:table-cell">Provider / model</th>
+                  <th className="hidden px-3 py-3 text-right font-semibold lg:table-cell">Messages</th>
+                  <th className="hidden px-3 py-3 text-right font-semibold lg:table-cell">Input</th>
+                  <th className="hidden px-3 py-3 text-right font-semibold lg:table-cell">Output</th>
+                  <th className="hidden px-3 py-3 text-right font-semibold lg:table-cell">Cached</th>
+                  <th className="w-[25%] px-3 py-3 text-right font-semibold md:w-auto">Cost</th>
+                  <th className="w-[17%] px-3 py-3 text-right font-semibold md:w-auto">Credits</th>
+                  <th className="hidden px-3 py-3 text-right font-semibold xl:table-cell">Opened</th>
                 </tr>
               </thead>
               <tbody>
                 {stats.map((chat) => (
-                  <tr key={chat.id} className={chat.id === selected?.id ? "bg-primary/5" : "hover:bg-muted/30"}>
-                    <td className="px-4 py-3">
-                      <Link className="font-medium underline-offset-4 hover:underline" href={`/app/stats?chatId=${chat.id}&sort=${currentSort}&dir=${currentDir}`}>
+                  <tr key={chat.id} className={`border-b border-ink/15 ${chat.id === selected?.id ? "bg-paper-surface" : "hover:bg-paper-surface/55"}`}>
+                    <td className="max-w-56 px-3 py-4">
+                      <Link className="block truncate font-display text-sm font-semibold underline-offset-4 hover:text-ochre hover:underline" href={`/app/stats?chatId=${chat.id}&sort=${currentSort}&dir=${currentDir}`}>
                         {chat.title}
                       </Link>
+                      <span className="mt-1 flex items-center gap-2 sm:hidden">
+                        {isProviderId(chat.provider) ? <ProviderMark provider={chat.provider} showLabel={false} /> : <span className="h-2 w-2 rounded-full bg-ink-muted" />}
+                        <span className="truncate font-mono text-[0.6rem] text-ink-muted">{chat.provider} · {chat.model}</span>
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {chat.provider} · {chat.model}
+                    <td className="hidden max-w-64 px-3 py-4 sm:table-cell">
+                      <span className="flex items-center gap-2">
+                        {isProviderId(chat.provider) ? <ProviderMark provider={chat.provider} showLabel={false} /> : <span className="h-2 w-2 rounded-full bg-ink-muted" />}
+                        <span className="truncate font-mono text-[0.68rem] text-ink-muted">{chat.provider} · {chat.model}</span>
+                      </span>
                     </td>
-                    <td className="px-4 py-3">{formatNumber(chat.messageCount)}</td>
-                    <td className="px-4 py-3">{formatNumber(chat.inputTokens)}</td>
-                    <td className="px-4 py-3">{formatNumber(chat.outputTokens)}</td>
-                    <td className="px-4 py-3">{formatNumber(chat.cachedTokens)}</td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium">{formatMoney(chat.cost.total)}</p>
+                    <td className="hidden px-3 py-4 text-right font-mono lg:table-cell">{formatNumber(chat.messageCount)}</td>
+                    <td className="hidden px-3 py-4 text-right font-mono lg:table-cell">{formatNumber(chat.inputTokens)}</td>
+                    <td className="hidden px-3 py-4 text-right font-mono lg:table-cell">{formatNumber(chat.outputTokens)}</td>
+                    <td className="hidden px-3 py-4 text-right font-mono lg:table-cell">{formatNumber(chat.cachedTokens)}</td>
+                    <td className="px-3 py-4 text-right">
+                      <p className="font-mono font-semibold">{formatMoney(chat.cost.total)}</p>
                       <CostSplit cost={chat.cost} />
                     </td>
-                    <td className="px-4 py-3">{formatNumber(chat.creditsSpent)}</td>
-                    <td className="px-4 py-3">{formatDate(chat.createdAt)}</td>
+                    <td className="px-3 py-4 text-right font-mono">{formatNumber(chat.creditsSpent)}</td>
+                    <td className="hidden px-3 py-4 text-right font-mono text-[0.68rem] xl:table-cell">{formatDate(chat.createdAt)}</td>
                   </tr>
                 ))}
                 {stats.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-8 text-center text-muted-foreground" colSpan={9}>
-                      No chats have usage yet.
+                  <tr className="border-b border-ink/15">
+                    <td className="px-3 py-8 text-center text-sm text-ink-muted" colSpan={9}>
+                      No usage is recorded yet. <Link className="font-semibold text-ochre underline-offset-4 hover:underline" href="/app">Start a chat to open the ledger.</Link>
                     </td>
                   </tr>
                 ) : null}
@@ -411,12 +402,13 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
         </section>
 
         {selected ? (
-          <section className="rounded-md border bg-background">
-            <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">Turn breakdown</h2>
-              <p className="text-sm text-muted-foreground">{selected.title}</p>
+          <section className="mt-10" aria-labelledby="turn-ledger-heading">
+            <div className="border-b border-ink/25 pb-3">
+              <p className="utility-label">Selected case</p>
+              <h2 id="turn-ledger-heading" className="mt-1 text-2xl font-semibold">Turn breakdown</h2>
+              <p className="mt-1 text-sm text-ink-muted">{selected.title}</p>
             </div>
-            <div className="divide-y">
+            <div>
               {selectedAssistantMessages.map((message) => {
                 const events = selectedUsage.filter((event) => event.message_id === message.id);
                 const cost = events.reduce(
@@ -429,22 +421,22 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
                 const firstEvent = events[0];
 
                 return (
-                  <div key={message.id} className="grid gap-3 px-4 py-4 md:grid-cols-[1fr_180px_180px]">
+                  <div key={message.id} className="grid gap-3 border-b border-ink/15 py-4 md:grid-cols-[minmax(0,1fr)_14rem_14rem]">
                     <div className="min-w-0">
-                      <p className="font-medium">Assistant turn {message.seq}</p>
-                      <p className="truncate text-sm text-muted-foreground">
-                        {message.content || "No final answer stored yet"}
+                      <p className="font-display font-semibold">Assistant turn <span className="font-mono">{message.seq}</span></p>
+                      <p className="mt-1 truncate text-xs text-ink-muted">
+                        {message.content || "This turn has not stored a final answer yet."}
                       </p>
                     </div>
-                    <div className="text-sm">
-                      <p>{firstEvent ? `${firstEvent.provider} · ${firstEvent.model}` : "No usage events"}</p>
-                      <p className="text-muted-foreground">
+                    <div className="text-xs md:text-right">
+                      <p className="font-mono">{firstEvent ? `${firstEvent.provider} · ${firstEvent.model}` : "No usage recorded"}</p>
+                      <p className="mt-1 font-mono text-[0.65rem] text-ink-muted">
                         {formatNumber(inputTokens)} in · {formatNumber(outputTokens)} out · {formatNumber(cachedTokens)} cached
                       </p>
                     </div>
-                    <div className="text-sm">
-                      <p className="font-medium">{formatMoney(cost.total)}</p>
-                      <p className="text-muted-foreground">
+                    <div className="text-xs md:text-right">
+                      <p className="font-mono font-semibold">{formatMoney(cost.total)}</p>
+                      <p className="mt-1 font-mono text-[0.65rem] text-ink-muted">
                         {formatMoney(cost.input)} in · {formatMoney(cost.output)} out · {formatMoney(cost.cached)} cached
                       </p>
                     </div>
@@ -452,8 +444,8 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
                 );
               })}
               {selectedAssistantMessages.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  This chat has no completed assistant turns yet.
+                <div className="border-b border-ink/15 py-8 text-sm text-ink-muted">
+                  No completed turns are recorded yet. Return to the chat and send a research question.
                 </div>
               ) : null}
             </div>
