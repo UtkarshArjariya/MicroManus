@@ -8,6 +8,7 @@ const MAX_MODEL_PAGES = 20;
 export type AvailableProviderModel = {
   id: string;
   label: string;
+  releasedAt: string | null;
 };
 
 export class ProviderModelListError extends Error {
@@ -67,23 +68,83 @@ async function fetchModelJson<T>(provider: ProviderId, input: string, init: Requ
   }
 }
 
+type ProviderModelRow = {
+  id?: string;
+  name?: string;
+  display_name?: string;
+  created?: number | string;
+  created_at?: string;
+  createTime?: string;
+  release_date?: string;
+  released_at?: string;
+};
+
+function normalizeReleaseDate(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const numericValue = typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value.trim())
+    ? Number(value)
+    : value;
+  const timestamp = typeof numericValue === "number"
+    ? numericValue * (numericValue < 10_000_000_000 ? 1_000 : 1)
+    : Date.parse(numericValue);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+
+  return new Date(timestamp).toISOString();
+}
+
+function inferReleaseDateFromId(id: string) {
+  const compactDate = id.match(/(?:^|[-_])(20\d{2})(0[1-9]|1[0-2])([0-2]\d|3[01])(?:$|[-_])/);
+  if (compactDate) {
+    return normalizeReleaseDate(`${compactDate[1]}-${compactDate[2]}-${compactDate[3]}T00:00:00Z`);
+  }
+
+  const dashedDate = id.match(/(?:^|[-_])(20\d{2})-(0[1-9]|1[0-2])-([0-2]\d|3[01])(?:$|[-_])/);
+  if (dashedDate) {
+    return normalizeReleaseDate(`${dashedDate[1]}-${dashedDate[2]}-${dashedDate[3]}T00:00:00Z`);
+  }
+
+  return null;
+}
+
+function releaseDateForModel(model: ProviderModelRow) {
+  return normalizeReleaseDate(
+    model.created ?? model.created_at ?? model.createTime ?? model.release_date ?? model.released_at,
+  ) ?? inferReleaseDateFromId(model.id ?? model.name ?? "");
+}
+
 function normalizeModels(models: AvailableProviderModel[]) {
   const unique = new Map<string, AvailableProviderModel>();
   for (const model of models) {
     const id = model.id.trim();
     if (!id) continue;
-    unique.set(id, { id, label: model.label.trim() || id });
+    const existing = unique.get(id);
+    unique.set(id, {
+      id,
+      label: model.label.trim() || existing?.label || id,
+      releasedAt: model.releasedAt ?? existing?.releasedAt ?? inferReleaseDateFromId(id),
+    });
   }
 
-  return [...unique.values()].sort((left, right) =>
-    left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: "base" }),
-  );
+  return [...unique.values()]
+    .map((model, providerOrder) => ({ model, providerOrder }))
+    .sort((left, right) => {
+      const leftRelease = left.model.releasedAt ? Date.parse(left.model.releasedAt) : null;
+      const rightRelease = right.model.releasedAt ? Date.parse(right.model.releasedAt) : null;
+      if (leftRelease !== null && rightRelease !== null && leftRelease !== rightRelease) {
+        return rightRelease - leftRelease;
+      }
+      if (leftRelease !== null && rightRelease === null) return -1;
+      if (leftRelease === null && rightRelease !== null) return 1;
+      return left.providerOrder - right.providerOrder;
+    })
+    .map(({ model }) => model);
 }
 
 async function listOpenAiModels(input: ListModelsInput, baseUrl: string) {
   const payload = await fetchModelJson<{
-    data?: Array<{ id?: string; name?: string; display_name?: string }>;
-    models?: Array<{ id?: string; name?: string; display_name?: string }>;
+    data?: ProviderModelRow[];
+    models?: ProviderModelRow[];
   }>(input.provider, `${baseUrl}/models`, {
     headers: { Authorization: `Bearer ${input.apiKey}`, Accept: "application/json" },
   });
@@ -91,6 +152,7 @@ async function listOpenAiModels(input: ListModelsInput, baseUrl: string) {
   return rows.map((model) => ({
     id: model.id ?? model.name ?? "",
     label: model.display_name ?? model.name ?? model.id ?? "",
+    releasedAt: releaseDateForModel(model),
   }));
 }
 
@@ -103,7 +165,7 @@ async function listAnthropicModels(input: ListModelsInput, baseUrl: string) {
     url.searchParams.set("limit", "1000");
     if (afterId) url.searchParams.set("after_id", afterId);
     const payload = await fetchModelJson<{
-      data?: Array<{ id?: string; display_name?: string }>;
+      data?: Array<ProviderModelRow>;
       has_more?: boolean;
       last_id?: string;
     }>(input.provider, url.toString(), {
@@ -114,7 +176,11 @@ async function listAnthropicModels(input: ListModelsInput, baseUrl: string) {
       },
     });
     for (const model of payload.data ?? []) {
-      models.push({ id: model.id ?? "", label: model.display_name ?? model.id ?? "" });
+      models.push({
+        id: model.id ?? "",
+        label: model.display_name ?? model.id ?? "",
+        releasedAt: releaseDateForModel(model),
+      });
     }
     if (!payload.has_more || !payload.last_id || payload.last_id === afterId) break;
     afterId = payload.last_id;
@@ -137,6 +203,9 @@ async function listGoogleModels(input: ListModelsInput, baseUrl: string) {
         displayName?: string;
         supportedGenerationMethods?: string[];
         supportedActions?: string[];
+        createTime?: string;
+        release_date?: string;
+        released_at?: string;
       }>;
       nextPageToken?: string;
     }>(input.provider, url.toString(), {
@@ -146,7 +215,11 @@ async function listGoogleModels(input: ListModelsInput, baseUrl: string) {
       const methods = model.supportedGenerationMethods ?? model.supportedActions ?? [];
       if (methods.length > 0 && !methods.includes("generateContent")) continue;
       const id = (model.name ?? "").replace(/^models\//, "");
-      models.push({ id, label: model.displayName ?? id });
+      models.push({
+        id,
+        label: model.displayName ?? id,
+        releasedAt: releaseDateForModel({ ...model, id }),
+      });
     }
     if (!payload.nextPageToken || payload.nextPageToken === pageToken) break;
     pageToken = payload.nextPageToken;
