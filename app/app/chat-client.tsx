@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   CreditCard,
@@ -35,7 +35,7 @@ type ProviderKey = {
   default_model: string;
 };
 
-type AvailableModel = { id: string; label: string };
+type AvailableModel = { id: string; label: string; releasedAt?: string | null };
 
 type Chat = {
   id: string;
@@ -278,18 +278,22 @@ function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const modelRequestSequence = useRef(0);
   const models = useMemo(() => {
     const catalog = new Map<string, AvailableModel>();
-    if (selectedKey) {
-      getModelsForProvider(selectedKey.provider).forEach((item) =>
-        catalog.set(item.modelId, { id: item.modelId, label: item.label }),
-      );
-    }
     loadedModels.forEach((item) => catalog.set(item.id, item));
+    if (selectedKey) {
+      getModelsForProvider(selectedKey.provider).forEach((item) => {
+        if (!catalog.has(item.modelId)) {
+          catalog.set(item.modelId, { id: item.modelId, label: item.label });
+        }
+      });
+    }
     return [...catalog.values()];
   }, [loadedModels, selectedKey]);
 
   function onKeyChange(id: string) {
+    modelRequestSequence.current += 1;
     setProviderKeyId(id);
     const key = keys.find((item) => item.id === id);
     setModel(key?.default_model ?? "");
@@ -297,8 +301,9 @@ function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
     setError(null);
   }
 
-  async function loadModels() {
+  const loadModels = useCallback(async () => {
     if (!selectedKey) return;
+    const requestSequence = ++modelRequestSequence.current;
     setIsLoadingModels(true);
     setError(null);
     try {
@@ -308,18 +313,25 @@ function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
         body: JSON.stringify({ provider: selectedKey.provider, providerKeyId: selectedKey.id }),
       });
       const payload = await parseJsonResponse<{ models?: AvailableModel[]; error?: string }>(response);
+      if (requestSequence !== modelRequestSequence.current) return;
       if (!response.ok || !payload?.models) {
         setError(payload?.error ?? "The provider couldn’t list models for this key.");
         return;
       }
       setLoadedModels(payload.models);
-      if (!model && payload.models[0]) setModel(payload.models[0].id);
+      setModel((current) => current || payload.models?.[0]?.id || "");
     } catch {
-      setError("We couldn’t reach the provider model catalog. Try again in a moment.");
+      if (requestSequence === modelRequestSequence.current) {
+        setError("We couldn’t reach the provider model catalog. Try again in a moment.");
+      }
     } finally {
-      setIsLoadingModels(false);
+      if (requestSequence === modelRequestSequence.current) setIsLoadingModels(false);
     }
-  }
+  }, [selectedKey]);
+
+  useEffect(() => {
+    void loadModels();
+  }, [loadModels]);
 
   async function createChat() {
     if (!providerKeyId || !model.trim()) {
@@ -406,14 +418,18 @@ function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
           />
           <datalist id="new-chat-models">
             {models.map((item) => (
-              <option key={item.id} value={item.id}>{item.label}</option>
+              <option key={item.id} value={item.id}>
+                {item.label}{item.releasedAt ? ` · ${item.releasedAt.slice(0, 10)}` : ""}
+              </option>
             ))}
           </datalist>
           <div className="flex items-center justify-between gap-3">
             <p className="text-[0.68rem] text-ink-muted">
-              {loadedModels.length > 0 ? `${loadedModels.length} available models loaded` : "Enter an ID or load this key’s catalog"}
+              {loadedModels.length > 0
+                ? `${loadedModels.length} available models · newest releases first`
+                : "Loading this key’s model catalog…"}
             </p>
-            <Button disabled={isLoadingModels} onClick={loadModels} size="sm" type="button" variant="text">
+            <Button disabled={isLoadingModels} onClick={() => void loadModels()} size="sm" type="button" variant="text">
               {isLoadingModels ? <Loader2 className="animate-spin" aria-hidden="true" /> : <ListRestart aria-hidden="true" />}
               {loadedModels.length > 0 ? "Refresh" : "Load all models"}
             </Button>
