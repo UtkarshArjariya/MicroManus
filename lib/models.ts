@@ -1,11 +1,16 @@
 export type ProviderId = "openai" | "anthropic" | "google" | "kimi" | "openai_compatible";
-export type ProviderApiFormat = "openai" | "anthropic" | "google";
+export type ProviderApiFormat = "openai" | "openai_responses" | "anthropic" | "google";
 
 export const PROVIDER_API_FORMATS: Array<{ value: ProviderApiFormat; label: string; description: string }> = [
   {
     value: "openai",
     label: "OpenAI-compatible",
     description: "Uses /chat/completions with Bearer authentication.",
+  },
+  {
+    value: "openai_responses",
+    label: "OpenAI Responses",
+    description: "Uses /responses with Bearer authentication and stateless tool-call items.",
   },
   {
     value: "anthropic",
@@ -26,6 +31,10 @@ export function isProviderApiFormat(value: string): value is ProviderApiFormat {
 export function getProviderApiFormat(provider: ProviderId, savedFormat?: string | null): ProviderApiFormat {
   if (provider === "anthropic") return "anthropic";
   if (provider === "google") return "google";
+  if (provider === "openai") {
+    if (savedFormat === "openai" || savedFormat === "openai_responses") return savedFormat;
+    return "openai_responses";
+  }
   if (provider === "openai_compatible" && savedFormat && isProviderApiFormat(savedFormat)) return savedFormat;
   return "openai";
 }
@@ -37,6 +46,7 @@ export type ModelPricing = {
   inputPricePerM: number;
   outputPricePerM: number;
   cachedInputPricePerM: number | null;
+  cacheWritePricePerM?: number | null;
   supportsPromptCaching: boolean;
   note?: string;
 };
@@ -52,7 +62,18 @@ export const MODEL_PRICING: ModelPricing[] = [
     outputPricePerM: 1.6,
     cachedInputPricePerM: 0.1,
     supportsPromptCaching: true,
-    note: "Stable Chat Completions default; pricing can change and should be reviewed periodically.",
+    note: "Legacy low-cost fallback; pricing can change and should be reviewed periodically.",
+  },
+  {
+    provider: "openai",
+    modelId: "gpt-5.6-sol",
+    label: "GPT-5.6 Sol",
+    inputPricePerM: 5,
+    outputPricePerM: 30,
+    cachedInputPricePerM: 0.5,
+    cacheWritePricePerM: 6.25,
+    supportsPromptCaching: true,
+    note: "Official standard-tier pricing; cache writes are billed at 1.25x input.",
   },
   {
     provider: "openai",
@@ -61,7 +82,20 @@ export const MODEL_PRICING: ModelPricing[] = [
     inputPricePerM: 2.5,
     outputPricePerM: 15,
     cachedInputPricePerM: 0.25,
+    cacheWritePricePerM: 3.125,
     supportsPromptCaching: true,
+    note: "Official standard-tier pricing; cache writes are billed at 1.25x input.",
+  },
+  {
+    provider: "openai",
+    modelId: "gpt-5.6-luna",
+    label: "GPT-5.6 Luna",
+    inputPricePerM: 1,
+    outputPricePerM: 6,
+    cachedInputPricePerM: 0.1,
+    cacheWritePricePerM: 1.25,
+    supportsPromptCaching: true,
+    note: "Official standard-tier pricing; cache writes are billed at 1.25x input.",
   },
   {
     provider: "openai",
@@ -99,6 +133,7 @@ export const MODEL_PRICING: ModelPricing[] = [
     inputPricePerM: 3,
     outputPricePerM: 15,
     cachedInputPricePerM: 0.3,
+    cacheWritePricePerM: 3.75,
     supportsPromptCaching: true,
     note: "Stable Messages API default; pricing can change and should be reviewed periodically.",
   },
@@ -109,6 +144,7 @@ export const MODEL_PRICING: ModelPricing[] = [
     inputPricePerM: 15,
     outputPricePerM: 75,
     cachedInputPricePerM: 1.5,
+    cacheWritePricePerM: 18.75,
     supportsPromptCaching: true,
     note: "Verify exact model availability. Current public Opus-family API pricing checked against Anthropic docs.",
   },
@@ -119,6 +155,7 @@ export const MODEL_PRICING: ModelPricing[] = [
     inputPricePerM: 3,
     outputPricePerM: 15,
     cachedInputPricePerM: 0.3,
+    cacheWritePricePerM: 3.75,
     supportsPromptCaching: true,
     note: "Verify exact model availability. Current public Sonnet-family API pricing checked against Anthropic docs.",
   },
@@ -129,6 +166,7 @@ export const MODEL_PRICING: ModelPricing[] = [
     inputPricePerM: 0.8,
     outputPricePerM: 4,
     cachedInputPricePerM: 0.08,
+    cacheWritePricePerM: 1,
     supportsPromptCaching: true,
     note: "Verify exact model availability. Current public Haiku-family API pricing checked against Anthropic docs.",
   },
@@ -183,7 +221,7 @@ export const MODEL_PRICING: ModelPricing[] = [
 ];
 
 const FALLBACK_MODEL_RELEASE_ORDER: Partial<Record<ProviderId, string[]>> = {
-  openai: ["gpt-5.6-terra", "gpt-5.5", "gpt-5.4-mini", "gpt-4.1-mini", "gpt-4.1"],
+  openai: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4-mini", "gpt-4.1-mini", "gpt-4.1"],
   anthropic: ["claude-sonnet-5", "claude-opus-4-8", "claude-haiku-4-5-20251001", "claude-sonnet-4-20250514"],
   google: ["gemini-2.5-pro", "gemini-2.5-flash"],
   kimi: ["kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5"],
@@ -201,7 +239,7 @@ export function getModelsForProvider(provider: ProviderId) {
 }
 
 export function getDefaultModel(provider: ProviderId) {
-  if (provider === "openai") return "gpt-4.1-mini";
+  if (provider === "openai") return "gpt-5.6-terra";
   if (provider === "anthropic") return "claude-sonnet-4-20250514";
   if (provider === "google") return "gemini-2.5-flash";
   if (provider === "kimi") return "kimi-k2.5";
