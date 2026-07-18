@@ -4,11 +4,18 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { encrypt } from "@/lib/crypto";
-import { getDefaultBaseUrl, getDefaultModel, type ProviderId } from "@/lib/models";
+import {
+  getDefaultBaseUrl,
+  getDefaultModel,
+  getProviderApiFormat,
+  isProviderApiFormat,
+  type ProviderApiFormat,
+  type ProviderId,
+} from "@/lib/models";
 import { logServerError } from "@/lib/server-errors";
 import { createClient } from "@/lib/supabase/server";
 
-const PROVIDERS = new Set<ProviderId>(["openai", "anthropic", "kimi", "openai_compatible"]);
+const PROVIDERS = new Set<ProviderId>(["openai", "anthropic", "google", "kimi", "openai_compatible"]);
 
 export type ProviderKeyActionResult = {
   ok?: true;
@@ -34,18 +41,33 @@ function normalizeProvider(value: string): ProviderId {
   return value as ProviderId;
 }
 
-function normalizeBaseUrl(provider: ProviderId, baseUrl: string) {
-  if (provider === "anthropic") {
-    return null;
+function normalizeApiFormat(provider: ProviderId, value: string): ProviderApiFormat {
+  if (provider === "openai_compatible") {
+    if (!isProviderApiFormat(value)) {
+      throw new ActionInputError("Choose how the custom endpoint is API-compatible.");
+    }
+    return value;
   }
 
+  return getProviderApiFormat(provider);
+}
+
+function normalizeBaseUrl(provider: ProviderId, baseUrl: string) {
   const normalized = baseUrl || getDefaultBaseUrl(provider);
 
   if (provider === "openai_compatible" && !normalized) {
-    throw new ActionInputError("Base URL is required for custom OpenAI-compatible providers.");
+    throw new ActionInputError("Base URL is required for custom endpoints.");
   }
 
-  return normalized.replace(/\/$/, "");
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) {
+      throw new Error("Unsupported protocol");
+    }
+    return normalized.replace(/\/$/, "");
+  } catch {
+    throw new ActionInputError("Enter a valid HTTPS base URL for this provider.");
+  }
 }
 
 export async function saveProviderKey(formData: FormData): Promise<ProviderKeyActionResult> {
@@ -70,6 +92,7 @@ export async function saveProviderKey(formData: FormData): Promise<ProviderKeyAc
     const provider = normalizeProvider(text(formData, "provider"));
     const apiKey = text(formData, "apiKey");
     const label = text(formData, "label");
+    const apiFormat = normalizeApiFormat(provider, text(formData, "apiFormat"));
     const baseUrl = normalizeBaseUrl(provider, text(formData, "baseUrl"));
     const defaultModel = text(formData, "defaultModel") || getDefaultModel(provider);
 
@@ -84,6 +107,7 @@ export async function saveProviderKey(formData: FormData): Promise<ProviderKeyAc
     if (id) {
       const updatePayload: Record<string, string | null> = {
         provider,
+        api_format: apiFormat,
         label,
         base_url: baseUrl,
         default_model: defaultModel,
@@ -111,6 +135,7 @@ export async function saveProviderKey(formData: FormData): Promise<ProviderKeyAc
       const { error } = await supabase.from("provider_keys").insert({
         user_id: user.id,
         provider,
+        api_format: apiFormat,
         label,
         base_url: baseUrl,
         encrypted_key: encrypt(apiKey),
