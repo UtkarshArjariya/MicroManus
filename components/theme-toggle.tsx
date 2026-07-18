@@ -54,7 +54,7 @@ export function ThemeToggle({
             aria-label={`Use ${label.toLowerCase()} theme`}
             aria-pressed={selected}
             className={cn(
-              "inline-flex min-h-9 items-center justify-center gap-2 border border-transparent px-2 font-body text-xs font-medium text-ink-muted transition-[background-color,border-color,color] hover:border-ink/20 hover:bg-paper-deep/70 hover:text-ink focus-visible:outline-none",
+              "inline-flex min-h-9 items-center justify-center gap-2 border border-transparent px-2 font-body text-xs font-medium text-ink-muted transition-[background-color,border-color,color] hover:border-ink/20 hover:bg-paper-deep/70 hover:text-ink",
               selected && "border-ochre/60 bg-ochre/15 text-ink",
             )}
             key={value}
