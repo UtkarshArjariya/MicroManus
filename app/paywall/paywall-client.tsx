@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { STRIPE_UNLOCK_COPY } from "@/lib/credits";
+import { parseJsonResponse } from "@/lib/http";
 
 type PaywallClientProps = {
   paymentCancelled: boolean;
@@ -36,9 +37,13 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
 
       try {
         const response = await fetch("/api/wallet", { cache: "no-store" });
-        const data = (await response.json()) as { balance?: number };
+        if (!response.ok) {
+          throw new Error("Wallet polling failed.");
+        }
 
-        if (!cancelled && typeof data.balance === "number" && data.balance > 0) {
+        const data = await parseJsonResponse<{ balance?: number }>(response);
+
+        if (!cancelled && typeof data?.balance === "number" && data.balance > 0) {
           window.location.assign("/app");
           return;
         }
@@ -71,15 +76,23 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
       const response = await fetch("/api/stripe/create-checkout-session", {
         method: "POST",
       });
-      const data = (await response.json()) as { url?: string; error?: string };
 
-      if (!response.ok || !data.url) {
-        throw new Error(data.error ?? "Unable to start checkout.");
+      if (!response.ok) {
+        const errorPayload = await parseJsonResponse<{ error?: string }>(response);
+        setCheckoutError(errorPayload?.error ?? "Something went wrong. Try again.");
+        return;
+      }
+
+      const data = await parseJsonResponse<{ url?: string }>(response);
+      if (!data?.url) {
+        setCheckoutError("Something went wrong. Try again.");
+        return;
       }
 
       window.location.assign(data.url);
-    } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : "Unable to start checkout.");
+    } catch {
+      setCheckoutError("Something went wrong. Try again.");
+    } finally {
       setIsStartingCheckout(false);
     }
   }
