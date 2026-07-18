@@ -1,6 +1,11 @@
 import "server-only";
 
-import type { ProviderId } from "@/lib/models";
+import {
+  getDefaultBaseUrl,
+  getProviderApiFormat,
+  type ProviderApiFormat,
+  type ProviderId,
+} from "@/lib/models";
 import { anthropicTools, openAiTools } from "@/lib/agent/tools";
 import { logServerError } from "@/lib/server-errors";
 
@@ -32,6 +37,7 @@ export type ProviderResponse = {
 
 export type ProviderCredentials = {
   provider: ProviderId;
+  apiFormat?: ProviderApiFormat | null;
   apiKey: string;
   baseUrl: string | null;
   model: string;
@@ -76,6 +82,16 @@ type AnthropicTool = (typeof anthropicTools)[number] & {
   cache_control?: { type: "ephemeral" };
 };
 
+type GooglePart =
+  | { text: string }
+  | { functionCall: { id?: string; name: string; args?: Record<string, unknown> } }
+  | { functionResponse: { name: string; response: Record<string, unknown> } };
+
+type GoogleContent = {
+  role: "user" | "model";
+  parts: GooglePart[];
+};
+
 export function parseToolArguments(value: string | undefined): Record<string, unknown> {
   if (!value) {
     return {};
@@ -91,16 +107,12 @@ export function parseToolArguments(value: string | undefined): Record<string, un
   }
 }
 
-function openAiBaseUrl(credentials: ProviderCredentials) {
-  if (credentials.provider === "openai") {
-    return credentials.baseUrl || "https://api.openai.com/v1";
-  }
+function providerApiFormat(credentials: ProviderCredentials) {
+  return getProviderApiFormat(credentials.provider, credentials.apiFormat);
+}
 
-  if (credentials.provider === "kimi") {
-    return credentials.baseUrl || "https://api.moonshot.ai/v1";
-  }
-
-  return credentials.baseUrl || "";
+function providerBaseUrl(credentials: ProviderCredentials) {
+  return credentials.baseUrl || getDefaultBaseUrl(credentials.provider);
 }
 
 function providerDisplayName(provider: ProviderId) {
@@ -110,6 +122,10 @@ function providerDisplayName(provider: ProviderId) {
 
   if (provider === "kimi") {
     return "Kimi";
+  }
+
+  if (provider === "google") {
+    return "Google Gemini";
   }
 
   if (provider === "openai_compatible") {
@@ -191,16 +207,28 @@ export async function callProvider(
   messages: ChatMessage[],
   workingMessages: unknown[],
 ) {
-  if (credentials.provider === "anthropic") {
+  const apiFormat = providerApiFormat(credentials);
+
+  if (apiFormat === "anthropic") {
     return callAnthropic(credentials, messages, workingMessages as AnthropicMessage[]);
+  }
+
+  if (apiFormat === "google") {
+    return callGoogle(credentials, messages, workingMessages as GoogleContent[]);
   }
 
   return callOpenAiCompatible(credentials, messages, workingMessages as OpenAiMessage[]);
 }
 
 export function initialWorkingMessages(credentials: ProviderCredentials, messages: ChatMessage[]) {
-  if (credentials.provider === "anthropic") {
+  const apiFormat = providerApiFormat(credentials);
+
+  if (apiFormat === "anthropic") {
     return toAnthropicMessages(messages);
+  }
+
+  if (apiFormat === "google") {
+    return toGoogleContents(messages);
   }
 
   return messages.map((message) => ({
@@ -215,7 +243,9 @@ export function appendToolResults(
   assistantMessage: unknown,
   results: Array<{ toolCall: ToolCall; output: unknown }>,
 ) {
-  if (credentials.provider === "anthropic") {
+  const apiFormat = providerApiFormat(credentials);
+
+  if (apiFormat === "anthropic") {
     const anthropicMessages = workingMessages as AnthropicMessage[];
     anthropicMessages.push({
       role: "assistant",
@@ -227,6 +257,24 @@ export function appendToolResults(
         type: "tool_result",
         tool_use_id: toolCall.id,
         content: JSON.stringify(output).slice(0, 16_000),
+      })),
+    });
+    return;
+  }
+
+  if (apiFormat === "google") {
+    const googleContents = workingMessages as GoogleContent[];
+    const assistantContent = assistantMessage as GoogleContent;
+    if (assistantContent?.parts?.length) {
+      googleContents.push(assistantContent);
+    }
+    googleContents.push({
+      role: "user",
+      parts: results.map(({ toolCall, output }) => ({
+        functionResponse: {
+          name: toolCall.name,
+          response: googleFunctionResponse(output),
+        },
       })),
     });
     return;
@@ -248,7 +296,7 @@ async function callOpenAiCompatible(
   _messages: ChatMessage[],
   workingMessages: OpenAiMessage[],
 ): Promise<ProviderResponse> {
-  const baseUrl = openAiBaseUrl(credentials).replace(/\/$/, "");
+  const baseUrl = providerBaseUrl(credentials).replace(/\/$/, "");
   if (!baseUrl) {
     throw new Error("Missing OpenAI-compatible base URL.");
   }
@@ -264,7 +312,6 @@ async function callOpenAiCompatible(
       messages: workingMessages,
       tools: openAiTools,
       tool_choice: "auto",
-      temperature: 0.2,
       ...(credentials.provider === "kimi" && credentials.promptCacheKey
         ? { prompt_cache_key: credentials.promptCacheKey }
         : {}),
@@ -335,25 +382,31 @@ async function callAnthropic(
   messages: ChatMessage[],
   workingMessages: AnthropicMessage[],
 ): Promise<ProviderResponse> {
+  const baseUrl = providerBaseUrl(credentials).replace(/\/$/, "");
+  if (!baseUrl) {
+    throw new Error("Missing Anthropic-compatible base URL.");
+  }
+
   const system = messages
     .filter((message) => message.role === "system")
     .map((message) => message.content)
     .join("\n\n");
+  const useAnthropicCaching = credentials.provider === "anthropic";
   const cachedSystem: AnthropicContentBlock[] = [
     {
       type: "text",
       text: system,
-      cache_control: { type: "ephemeral" },
+      ...(useAnthropicCaching ? { cache_control: { type: "ephemeral" } as const } : {}),
     },
   ];
   const cachedTools: AnthropicTool[] = anthropicTools.map((tool, index) => ({
     ...tool,
-    ...(index === anthropicTools.length - 1
+    ...(useAnthropicCaching && index === anthropicTools.length - 1
       ? { cache_control: { type: "ephemeral" } as const }
       : {}),
   }));
 
-  const response = await providerFetch(credentials.provider, "https://api.anthropic.com/v1/messages", {
+  const response = await providerFetch(credentials.provider, `${baseUrl}/messages`, {
     method: "POST",
     headers: {
       "anthropic-version": "2023-06-01",
@@ -366,7 +419,6 @@ async function callAnthropic(
       system: cachedSystem,
       messages: workingMessages,
       tools: cachedTools,
-      temperature: 0.2,
     }),
   });
 
@@ -417,6 +469,132 @@ async function callAnthropic(
         (payload?.usage?.cache_read_input_tokens ?? 0),
       outputTokens: payload?.usage?.output_tokens ?? 0,
       cachedInputTokens: payload?.usage?.cache_read_input_tokens ?? 0,
+    },
+  };
+}
+
+function toGoogleContents(messages: ChatMessage[]) {
+  return messages
+    .filter((message) => message.role !== "system" && message.role !== "tool")
+    .map((message) => ({
+      role: message.role === "assistant" ? "model" as const : "user" as const,
+      parts: [{ text: message.content }],
+    })) satisfies GoogleContent[];
+}
+
+function googleSchema(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(googleSchema);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => key !== "additionalProperties")
+        .map(([key, entry]) => [key, googleSchema(entry)]),
+    );
+  }
+
+  return value;
+}
+
+function googleFunctionDeclarations() {
+  return openAiTools.map((tool) => ({
+    name: tool.function.name,
+    description: tool.function.description,
+    parameters: googleSchema(tool.function.parameters),
+  }));
+}
+
+function googleFunctionResponse(output: unknown): Record<string, unknown> {
+  const serialized = JSON.stringify(output);
+  const capped = (typeof serialized === "string" ? serialized : String(output)).slice(0, 16_000);
+
+  try {
+    const parsed = JSON.parse(capped) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return { result: parsed };
+  } catch {
+    return { result: capped };
+  }
+}
+
+async function callGoogle(
+  credentials: ProviderCredentials,
+  messages: ChatMessage[],
+  workingContents: GoogleContent[],
+): Promise<ProviderResponse> {
+  const baseUrl = providerBaseUrl(credentials).replace(/\/$/, "");
+  if (!baseUrl) {
+    throw new Error("Missing Google Gemini-compatible base URL.");
+  }
+
+  const model = credentials.model.replace(/^models\//, "");
+  const system = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  const response = await providerFetch(
+    credentials.provider,
+    `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": credentials.apiKey,
+      },
+      body: JSON.stringify({
+        ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+        contents: workingContents,
+        tools: [{ functionDeclarations: googleFunctionDeclarations() }],
+        toolConfig: { functionCallingConfig: { mode: "AUTO" } },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const error = new Error(`Provider returned HTTP ${response.status}.`);
+    logServerError("agent/provider.response", error, {
+      provider: credentials.provider,
+      status: response.status,
+    });
+    throw new ProviderRequestError(friendlyProviderError(credentials.provider, response.status), response.status);
+  }
+
+  const payload = await parseProviderJson<{
+    candidates?: Array<{ content?: GoogleContent }>;
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      cachedContentTokenCount?: number;
+    };
+  }>(response, credentials.provider);
+  const assistant = payload.candidates?.[0]?.content ?? { role: "model" as const, parts: [] };
+  const text = assistant.parts
+    .filter((part): part is { text: string } => "text" in part)
+    .map((part) => part.text)
+    .join("\n");
+  const toolCalls = assistant.parts
+    .filter(
+      (part): part is { functionCall: { id?: string; name: string; args?: Record<string, unknown> } } =>
+        "functionCall" in part,
+    )
+    .map((part, index) => ({
+      id: part.functionCall.id || `google-tool-${index + 1}`,
+      name: part.functionCall.name,
+      input: part.functionCall.args ?? {},
+    }));
+
+  return {
+    content: text,
+    toolCalls,
+    rawAssistantMessage: assistant,
+    usage: {
+      inputTokens: payload.usageMetadata?.promptTokenCount ?? 0,
+      outputTokens: payload.usageMetadata?.candidatesTokenCount ?? 0,
+      cachedInputTokens: payload.usageMetadata?.cachedContentTokenCount ?? 0,
     },
   };
 }
