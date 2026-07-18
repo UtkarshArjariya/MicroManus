@@ -7,6 +7,7 @@ import {
   CreditCard,
   Download,
   FileText,
+  ListRestart,
   Loader2,
   Menu,
   Plus,
@@ -33,6 +34,8 @@ type ProviderKey = {
   key_last4: string;
   default_model: string;
 };
+
+type AvailableModel = { id: string; label: string };
 
 type Chat = {
   id: string;
@@ -271,18 +274,51 @@ function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
   const [providerKeyId, setProviderKeyId] = useState(keys[0]?.id ?? "");
   const selectedKey = keys.find((key) => key.id === providerKeyId);
   const [model, setModel] = useState(selectedKey?.default_model ?? "");
+  const [loadedModels, setLoadedModels] = useState<AvailableModel[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const models = useMemo(
-    () => (selectedKey ? getModelsForProvider(selectedKey.provider) : []),
-    [selectedKey],
-  );
+  const models = useMemo(() => {
+    const catalog = new Map<string, AvailableModel>();
+    if (selectedKey) {
+      getModelsForProvider(selectedKey.provider).forEach((item) =>
+        catalog.set(item.modelId, { id: item.modelId, label: item.label }),
+      );
+    }
+    loadedModels.forEach((item) => catalog.set(item.id, item));
+    return [...catalog.values()];
+  }, [loadedModels, selectedKey]);
 
   function onKeyChange(id: string) {
     setProviderKeyId(id);
     const key = keys.find((item) => item.id === id);
     setModel(key?.default_model ?? "");
+    setLoadedModels([]);
     setError(null);
+  }
+
+  async function loadModels() {
+    if (!selectedKey) return;
+    setIsLoadingModels(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/provider-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: selectedKey.provider, providerKeyId: selectedKey.id }),
+      });
+      const payload = await parseJsonResponse<{ models?: AvailableModel[]; error?: string }>(response);
+      if (!response.ok || !payload?.models) {
+        setError(payload?.error ?? "The provider couldn’t list models for this key.");
+        return;
+      }
+      setLoadedModels(payload.models);
+      if (!model && payload.models[0]) setModel(payload.models[0].id);
+    } catch {
+      setError("We couldn’t reach the provider model catalog. Try again in a moment.");
+    } finally {
+      setIsLoadingModels(false);
+    }
   }
 
   async function createChat() {
@@ -326,7 +362,7 @@ function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
           <p className="utility-label">Provider required</p>
           <CardTitle className="mt-2 text-3xl">Add a research key</CardTitle>
           <CardDescription className="max-w-lg leading-6">
-            No provider keys are ready yet. Add an OpenAI, Anthropic, Kimi, or compatible key to start a chat.
+            No provider keys are ready yet. Add an OpenAI, Anthropic, Google, Kimi, or compatible key to start a chat.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -370,9 +406,18 @@ function NewChatPanel({ keys }: { keys: ProviderKey[] }) {
           />
           <datalist id="new-chat-models">
             {models.map((item) => (
-              <option key={item.modelId} value={item.modelId}>{item.label}</option>
+              <option key={item.id} value={item.id}>{item.label}</option>
             ))}
           </datalist>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[0.68rem] text-ink-muted">
+              {loadedModels.length > 0 ? `${loadedModels.length} available models loaded` : "Enter an ID or load this key’s catalog"}
+            </p>
+            <Button disabled={isLoadingModels} onClick={loadModels} size="sm" type="button" variant="text">
+              {isLoadingModels ? <Loader2 className="animate-spin" aria-hidden="true" /> : <ListRestart aria-hidden="true" />}
+              {loadedModels.length > 0 ? "Refresh" : "Load all models"}
+            </Button>
+          </div>
         </label>
         {error ? <InterfaceNotice tone="error">{error}</InterfaceNotice> : null}
         <Button disabled={isCreating} onClick={createChat}>
