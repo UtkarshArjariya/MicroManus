@@ -41,7 +41,11 @@ export async function POST(request: Request) {
     if (!provider || !PROVIDERS.has(provider)) return jsonError("Choose a supported provider before loading models.");
 
     let apiKey = body?.apiKey?.trim() ?? "";
-    let apiFormat = provider === "openai_compatible" ? body?.apiFormat : getProviderApiFormat(provider);
+    let apiFormat = provider === "openai_compatible"
+      ? body?.apiFormat
+      : provider === "openai" && (body?.apiFormat === "openai" || body?.apiFormat === "openai_responses")
+        ? body.apiFormat
+        : getProviderApiFormat(provider);
     let baseUrl = body?.baseUrl?.trim() || getDefaultBaseUrl(provider);
 
     if (!apiKey && body?.providerKeyId) {
