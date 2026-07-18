@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 type LoginPageProps = {
   searchParams: Promise<{
     error?: string;
+    next?: string;
   }>;
 };
 
@@ -65,6 +66,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               </InterfaceNotice>
             ) : null}
             <form action={signInWithGoogle}>
+              <input name="next" type="hidden" value={params.next ?? "/app"} />
               <Button className="w-full justify-start" type="submit" variant="outline">
                 <span aria-hidden="true" className="grid h-5 w-5 place-items-center font-mono text-xs font-semibold">
                   G
@@ -73,6 +75,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               </Button>
             </form>
             <form action={signInWithGitHub}>
+              <input name="next" type="hidden" value={params.next ?? "/app"} />
               <Button className="w-full justify-start" type="submit" variant="outline">
                 <Github aria-hidden="true" />
                 Continue with GitHub
