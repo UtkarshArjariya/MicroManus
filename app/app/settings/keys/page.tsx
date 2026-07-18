@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 
 import { KeysClient } from "@/app/app/settings/keys/keys-client";
+import { Wordmark } from "@/components/wordmark";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function KeysPage() {
@@ -12,9 +13,7 @@ export default async function KeysPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    redirect("/login");
-  }
+  if (!user) redirect("/login");
 
   const { data: keys } = await supabase
     .from("provider_keys")
@@ -23,29 +22,25 @@ export default async function KeysPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <main className="min-h-screen bg-stone-50 px-4 py-8">
-      <div className="mx-auto max-w-4xl space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm text-muted-foreground">Settings</p>
-            <h1 className="text-2xl font-semibold">Provider keys</h1>
-          </div>
+    <main className="min-h-screen bg-paper px-5 py-6 sm:px-8 sm:py-8">
+      <div className="mx-auto max-w-5xl">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-ink/20 pb-5">
+          <Wordmark href="/app" />
           <Button asChild variant="outline">
-            <Link href="/app">Back to chat</Link>
+            <Link href="/app"><ArrowLeft aria-hidden="true" />Back to chats</Link>
           </Button>
-        </div>
+        </header>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Bring your own LLM key</CardTitle>
-            <CardDescription>
-              Keys are encrypted on the server. Client responses only include provider metadata and the last four characters.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+        <section className="py-8 sm:py-10">
+          <p className="utility-label">Settings · Provider access</p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">Research keys</h1>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-ink-muted">
+            Add your own model provider. Key values are encrypted on the server; this page shows only their final four characters.
+          </p>
+          <div className="mt-8">
             <KeysClient keys={keys ?? []} />
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       </div>
     </main>
   );
