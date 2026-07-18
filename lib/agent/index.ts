@@ -71,6 +71,10 @@ export async function runAgent(options: AgentRunOptions) {
   const workingMessages = initialWorkingMessages(options.credentials, messages);
   const discoveredSources = new Set<string>();
   const visitedSources = new Set<string>();
+  const toolUsage = {
+    webSearches: 0,
+    pageFetches: 0,
+  };
   let finalAnswer = "";
 
   for (let i = 0; i < MAX_AGENT_STEPS; i += 1) {
@@ -112,6 +116,7 @@ export async function runAgent(options: AgentRunOptions) {
         messageId: options.messageId,
         discoveredSources,
         visitedSources,
+        toolUsage,
       });
       const artifact = toolCall.name === "generate_pdf_report" ? artifactFromToolOutput(output) : null;
 
