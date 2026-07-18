@@ -14,7 +14,7 @@ export async function GET() {
     } = await supabase.auth.getUser();
 
     if (userError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Your session ended. Sign in again to view credits." }, { status: 401 });
     }
 
     userId = user.id;
@@ -26,7 +26,7 @@ export async function GET() {
 
     if (error) {
       logServerError("api/wallet.query", error, { userId });
-      return jsonInternalError("Could not load wallet");
+      return jsonInternalError("We couldn’t load your credit balance. Refresh the page and try again.");
     }
 
     return NextResponse.json({ balance: data?.balance ?? 0 });
