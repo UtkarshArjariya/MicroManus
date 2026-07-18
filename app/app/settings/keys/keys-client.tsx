@@ -9,11 +9,20 @@ import { ProviderMark, providerName } from "@/components/provider-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseJsonResponse } from "@/lib/http";
-import { getDefaultBaseUrl, getDefaultModel, getModelsForProvider, type ProviderId } from "@/lib/models";
+import {
+  getDefaultBaseUrl,
+  getDefaultModel,
+  getModelsForProvider,
+  getProviderApiFormat,
+  PROVIDER_API_FORMATS,
+  type ProviderApiFormat,
+  type ProviderId,
+} from "@/lib/models";
 
 type ProviderKeyRow = {
   id: string;
   provider: ProviderId;
+  api_format: ProviderApiFormat;
   label: string;
   base_url: string | null;
   key_last4: string;
@@ -26,8 +35,9 @@ type FormStatus = { message: string; tone: "error" | "success" | "info" };
 const PROVIDERS: Array<{ value: ProviderId; label: string }> = [
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic (Claude)" },
+  { value: "google", label: "Google Gemini" },
   { value: "kimi", label: "Kimi (Moonshot)" },
-  { value: "openai_compatible", label: "Custom OpenAI-compatible" },
+  { value: "openai_compatible", label: "Custom endpoint" },
 ];
 
 function connectionError(status: number) {
@@ -39,8 +49,12 @@ function connectionError(status: number) {
 
 function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
   const [provider, setProvider] = useState<ProviderId>(existing?.provider ?? "openai");
+  const [apiFormat, setApiFormat] = useState<ProviderApiFormat>(
+    getProviderApiFormat(existing?.provider ?? "openai", existing?.api_format),
+  );
   const [baseUrl, setBaseUrl] = useState(existing?.base_url ?? getDefaultBaseUrl(existing?.provider ?? "openai"));
   const [model, setModel] = useState(existing?.default_model ?? getDefaultModel(existing?.provider ?? "openai"));
+  const [label, setLabel] = useState(existing?.label ?? `${providerName(existing?.provider ?? "openai")} key`);
   const [apiKey, setApiKey] = useState("");
   const [status, setStatus] = useState<FormStatus | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -48,6 +62,12 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
 
   function onProviderChange(value: ProviderId) {
     setProvider(value);
+    if (!existing) setLabel(`${providerName(value)} key`);
+    setApiFormat(
+      existing?.provider === value
+        ? getProviderApiFormat(value, existing.api_format)
+        : getProviderApiFormat(value),
+    );
     setBaseUrl(existing?.provider === value ? existing.base_url ?? getDefaultBaseUrl(value) : getDefaultBaseUrl(value));
     setModel(existing?.provider === value ? existing.default_model : getDefaultModel(value));
     setStatus(null);
@@ -59,7 +79,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
       const response = await fetch("/api/provider-keys/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, apiKey, baseUrl, model }),
+        body: JSON.stringify({ provider, apiKey, baseUrl, model, apiFormat }),
       });
 
       if (!response.ok) {
@@ -98,6 +118,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
     >
       {existing ? <input name="id" type="hidden" value={existing.id} /> : null}
       <input name="provider" type="hidden" value={provider} />
+      <input name="apiFormat" type="hidden" value={apiFormat} />
 
       {!existing ? (
         <div className="mb-6">
@@ -108,7 +129,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
 
       <fieldset>
         <legend className="mb-2 text-sm font-semibold">Provider</legend>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           {PROVIDERS.map((item) => (
             <button
               key={item.value}
@@ -131,7 +152,13 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <label className="block space-y-2 text-sm">
           <span className="font-semibold">Label</span>
-          <Input name="label" placeholder="Personal research key" required defaultValue={existing?.label} />
+          <Input
+            name="label"
+            placeholder="Personal research key"
+            required
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+          />
         </label>
         <label className="block space-y-2 text-sm">
           <span className="font-semibold">API key</span>
@@ -139,13 +166,41 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
             className="font-mono"
             name="apiKey"
             type="password"
-            placeholder={existing ? `Leave blank to keep sk-…${existing.key_last4}` : "sk-…"}
+            placeholder={existing ? `Leave blank to keep ••••${existing.key_last4}` : "Paste API key"}
             required={!existing}
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
           />
         </label>
       </div>
+
+      {provider === "openai_compatible" ? (
+        <fieldset className="mt-4">
+          <legend className="mb-2 text-sm font-semibold">API compatibility</legend>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {PROVIDER_API_FORMATS.map((format) => (
+              <button
+                key={format.value}
+                aria-pressed={apiFormat === format.value}
+                className={`border px-3 py-3 text-left transition-colors ${
+                  apiFormat === format.value
+                    ? "border-ink bg-paper-deep text-ink"
+                    : "border-ink/20 text-ink-muted hover:border-ink/50"
+                }`}
+                onClick={() => setApiFormat(format.value)}
+                type="button"
+              >
+                <span className="block text-xs font-semibold">{format.label}</span>
+                <span className="mt-1 block text-[0.68rem] leading-4">{format.description}</span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      ) : (
+        <p className="mt-4 text-xs leading-5 text-ink-muted">
+          Endpoint and API format are configured automatically. Paste the provider key and choose a model.
+        </p>
+      )}
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <label className="block space-y-2 text-sm">
@@ -155,7 +210,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
             name="baseUrl"
             placeholder={provider === "openai_compatible" ? "https://provider.example/v1" : "Provider default"}
             required={provider === "openai_compatible"}
-            disabled={provider === "anthropic"}
+            disabled={provider !== "openai_compatible"}
             value={baseUrl}
             onChange={(event) => setBaseUrl(event.target.value)}
           />
@@ -168,7 +223,7 @@ function ProviderForm({ existing }: { existing?: ProviderKeyRow }) {
             list={`models-${existing?.id ?? "new"}`}
             value={model}
             onChange={(event) => setModel(event.target.value)}
-            placeholder={provider === "openai_compatible" ? "model-id" : "Choose or enter a model ID"}
+            placeholder={provider === "openai_compatible" ? "Provider model ID" : "Choose or enter a model ID"}
             required
           />
           <datalist id={`models-${existing?.id ?? "new"}`}>
@@ -239,8 +294,13 @@ function SavedKeyRow({ keyRow }: { keyRow: ProviderKeyRow }) {
             <span className="text-xs text-ink-muted">{providerName(keyRow.provider)}</span>
           </div>
           <p className="mt-2 break-words font-mono text-xs leading-5 text-ink-muted">
-            sk-…{keyRow.key_last4} · {keyRow.default_model}
+            ••••{keyRow.key_last4} · {keyRow.default_model}
           </p>
+          {keyRow.provider === "openai_compatible" ? (
+            <p className="mt-1 text-[0.68rem] text-ink-muted">
+              {PROVIDER_API_FORMATS.find((format) => format.value === keyRow.api_format)?.label ?? "Custom API"}
+            </p>
+          ) : null}
           {keyRow.base_url ? <p className="mt-1 break-all font-mono text-[0.68rem] text-ink-muted">{keyRow.base_url}</p> : null}
         </div>
         <div className="flex items-center justify-between gap-2 sm:justify-end">
