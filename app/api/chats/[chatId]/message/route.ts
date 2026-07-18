@@ -10,6 +10,9 @@ import { createClient } from "@/lib/supabase/server";
 
 type MessageRole = "user" | "assistant" | "system" | "tool";
 
+const MAX_MESSAGE_CHARS = 8_000;
+const activeChatRuns = new Set<string>();
+
 function sse(event: string, data: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
@@ -24,6 +27,22 @@ function paywallResponse() {
     { error: "You need credits to send a message.", redirectTo: "/paywall" },
     { status: 402 },
   );
+}
+
+function friendlyAgentError(error: unknown) {
+  if (error instanceof Error) {
+    if (error.message.includes("insufficient_credits")) {
+      return "You do not have enough credits for that turn. Add credits and try again.";
+    }
+
+    if (error.message.includes("fetch failed")) {
+      return "A network request failed while the agent was working. Retry in a moment.";
+    }
+
+    return error.message;
+  }
+
+  return "Agent run failed. Retry in a moment.";
 }
 
 async function appendMessage(chatId: string, role: MessageRole, content: string) {
@@ -78,6 +97,13 @@ export async function POST(
     return NextResponse.json({ error: "Message content is required." }, { status: 400 });
   }
 
+  if (content.length > MAX_MESSAGE_CHARS) {
+    return NextResponse.json(
+      { error: `Message is too long. Keep it under ${MAX_MESSAGE_CHARS.toLocaleString()} characters.` },
+      { status: 413 },
+    );
+  }
+
   const admin = createAdminClient();
   const { data: chat, error: chatError } = await admin
     .from("chats")
@@ -122,12 +148,23 @@ export async function POST(
     return paywallResponse();
   }
 
+  const runKey = `${user.id}:${chatId}`;
+  if (activeChatRuns.has(runKey)) {
+    return NextResponse.json(
+      { error: "MicroManus is already working on this chat. Wait for the current response to finish." },
+      { status: 409 },
+    );
+  }
+  activeChatRuns.add(runKey);
+
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
       const send = (event: string, data: unknown) => {
         controller.enqueue(encoder.encode(sse(event, data)));
       };
+
+      let assistantMessageId: string | null = null;
 
       try {
         const userMessage = await appendMessage(chatId, "user", content);
@@ -149,6 +186,7 @@ export async function POST(
         }
 
         const assistantMessage = await appendMessage(chatId, "assistant", "");
+        assistantMessageId = assistantMessage.id;
         send("message", { userMessage, assistantMessage });
 
         let stepIndex = 0;
@@ -251,10 +289,20 @@ export async function POST(
 
         send("done", { messageId: assistantMessage.id });
       } catch (error) {
+        const message = friendlyAgentError(error);
+        if (assistantMessageId) {
+          await admin
+            .from("messages")
+            .update({ content: message })
+            .eq("id", assistantMessageId)
+            .eq("chat_id", chatId);
+          send("content", { messageId: assistantMessageId, chunk: message });
+        }
         send("error", {
-          error: error instanceof Error ? error.message : "Agent run failed.",
+          error: message,
         });
       } finally {
+        activeChatRuns.delete(runKey);
         controller.close();
       }
     },
