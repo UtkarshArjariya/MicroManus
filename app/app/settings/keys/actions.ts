@@ -28,7 +28,7 @@ function keyLast4(apiKey: string) {
 
 function normalizeProvider(value: string): ProviderId {
   if (!PROVIDERS.has(value as ProviderId)) {
-    throw new ActionInputError("Invalid provider.");
+    throw new ActionInputError("Choose a supported provider before saving the key.");
   }
 
   return value as ProviderId;
@@ -58,7 +58,7 @@ export async function saveProviderKey(formData: FormData): Promise<ProviderKeyAc
     user = authResult.data.user;
   } catch (error) {
     logServerError("action/provider-key.save.auth", error);
-    return { error: "Could not verify your session. Try again." };
+    return { error: "Your session ended. Sign in again, then save the key." };
   }
 
   if (!user) {
@@ -129,7 +129,7 @@ export async function saveProviderKey(formData: FormData): Promise<ProviderKeyAc
   } catch (error) {
     logServerError("action/provider-key.save", error, { userId: user.id });
     return {
-      error: error instanceof ActionInputError ? error.message : "Could not save the provider key. Try again.",
+      error: error instanceof ActionInputError ? error.message : "We couldn’t save this key. Check the details and try again.",
     };
   }
 }
@@ -144,7 +144,7 @@ export async function deleteProviderKey(formData: FormData): Promise<ProviderKey
     user = authResult.data.user;
   } catch (error) {
     logServerError("action/provider-key.delete.auth", error);
-    return { error: "Could not verify your session. Try again." };
+    return { error: "Your session ended. Sign in again, then delete the key." };
   }
 
   if (!user) {
@@ -173,7 +173,7 @@ export async function deleteProviderKey(formData: FormData): Promise<ProviderKey
   } catch (error) {
     logServerError("action/provider-key.delete", error, { userId: user.id });
     return {
-      error: error instanceof ActionInputError ? error.message : "Could not delete the provider key. Try again.",
+      error: error instanceof ActionInputError ? error.message : "We couldn’t delete this key. Check whether a chat still uses it, then retry.",
     };
   }
 }
