@@ -4,13 +4,15 @@ import { cn } from "@/lib/utils";
 const PROVIDER_NAMES: Record<ProviderId, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  google: "Google",
   kimi: "Kimi",
-  openai_compatible: "Custom",
+  openai_compatible: "Custom endpoint",
 };
 
 const PROVIDER_COLORS: Record<ProviderId, string> = {
   openai: "bg-ochre",
   anthropic: "bg-brick",
+  google: "bg-ochre",
   kimi: "bg-pine",
   openai_compatible: "bg-ink-muted",
 };
