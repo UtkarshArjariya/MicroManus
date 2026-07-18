@@ -10,7 +10,8 @@ Production signup URL: https://micromanus-drdroid.vercel.app/login
 - Server-enforced paywall and credit wallet.
 - Launch coupon `SID_DRDROID`, case-insensitive and whitespace-trimmed, grants 5 credits once per user.
 - Stripe Checkout test payment grants 5 credits through an idempotent signed webhook.
-- Bring-your-own-key provider settings for OpenAI, Anthropic, Kimi, and custom OpenAI-compatible endpoints.
+- Bring-your-own-key provider settings with built-in endpoints for OpenAI, Anthropic/Claude, Google Gemini, and Kimi.
+- Custom provider endpoints can use OpenAI Chat Completions, Anthropic Messages, or Google Gemini `generateContent` compatibility.
 - Encrypted BYOK storage. Keys are decrypted only in server code immediately before provider calls.
 - Chat threads with a multi-step agent loop using `web_search`, `fetch_page`, and `generate_pdf_report`.
 - Prompt caching hooks and cached-token extraction for OpenAI/Kimi/Anthropic-compatible usage payloads.
@@ -82,6 +83,7 @@ supabase/migrations/20260718001000_agent_chat_schema.sql
 supabase/migrations/20260718002000_report_artifacts.sql
 supabase/migrations/20260718003000_usage_costs_and_credit_billing.sql
 supabase/migrations/20260718162000_cli_access_probe.sql
+supabase/migrations/20260718180000_provider_api_formats.sql
 ```
 
 Apply migrations with the project-local CLI rather than pasting SQL into the Dashboard:
@@ -100,6 +102,7 @@ Core tables:
 - Prompt 3: `report_artifacts`, private Storage bucket `report-artifacts`, `agent_steps.type = artifact`.
 - Prompt 4: usage cost columns on `usage_events` and unique `credit_ledger_agent_turn_reference_unique`.
 - Operations: `20260718162000_cli_access_probe.sql` records verified CLI migration access without changing application schema.
+- Provider compatibility: `api_format` separates the provider identity from its OpenAI-, Anthropic-, or Google-compatible wire protocol.
 
 RLS:
 
