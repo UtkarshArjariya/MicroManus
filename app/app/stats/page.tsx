@@ -408,7 +408,7 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
                 {stats.length === 0 ? (
                   <tr className="border-b border-ink/15">
                     <td className="px-3 py-8 text-center text-sm text-ink-muted" colSpan={10}>
-                      No usage is recorded yet. <Link className="font-semibold text-ochre underline-offset-4 hover:underline" href="/app">Start a chat to open the ledger.</Link>
+                      No usage is recorded yet. <Link className="font-semibold text-ink decoration-ochre underline-offset-4 hover:underline" href="/app">Start a chat to open the ledger.</Link>
                     </td>
                   </tr>
                 ) : null}
