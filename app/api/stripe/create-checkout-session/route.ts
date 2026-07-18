@@ -17,7 +17,7 @@ export async function POST() {
     } = await supabase.auth.getUser();
 
     if (userError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Your session ended. Sign in again, then restart checkout." }, { status: 401 });
     }
 
     userId = user.id;
@@ -54,6 +54,6 @@ export async function POST() {
     return NextResponse.json({ url: session.url });
   } catch (error) {
     logServerError("api/stripe/create-checkout-session", error, { userId });
-    return jsonInternalError("Unable to start checkout. Try again.");
+    return jsonInternalError("We couldn’t start checkout. Try again in a moment.");
   }
 }
