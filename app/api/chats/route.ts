@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return jsonError("Unauthorized", 401);
+      return jsonError("Your session ended. Sign in again, then start the chat.", 401);
     }
 
     userId = user.id;
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
         userId,
         providerKeyId,
       });
-      return jsonInternalError("Could not create chat.");
+      return jsonInternalError("We couldn’t create the chat. Check your connection and try again.");
     }
 
     return NextResponse.json({ id: chat.id });
