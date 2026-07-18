@@ -1,8 +1,8 @@
 # MicroManus
 
-MicroManus is a usage-based deep-research AI agent web app. This first build includes the deployable Next.js 15 skeleton, Supabase OAuth auth, a credit wallet, coupon unlock, Stripe Checkout unlock, and a protected app shell. Chat, BYOK model keys, agent tools, and PDF reports come later.
+MicroManus is a usage-based deep-research AI agent web app. This build includes the deployable Next.js 15 skeleton, Supabase OAuth auth, a credit wallet, coupon unlock, Stripe Checkout unlock, encrypted bring-your-own-key provider settings, chat threads, and a web-search-capable research agent loop.
 
-The platform never stores a platform-owned LLM provider key. Later BYOK keys should be user-supplied and encrypted with `ENCRYPTION_KEY`.
+The platform never stores a platform-owned LLM provider key. User BYOK keys are encrypted with `ENCRYPTION_KEY` and are decrypted only inside server routes immediately before provider calls.
 
 ## Tech Stack
 
@@ -27,6 +27,7 @@ STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_PRICE_ID=
 ENCRYPTION_KEY=
+BRAVE_SEARCH_API_KEY=
 ```
 
 For production, `NEXT_PUBLIC_SITE_URL` must be your real `https://*.vercel.app` or custom domain with no trailing slash.
@@ -59,13 +60,17 @@ For production, `NEXT_PUBLIC_SITE_URL` must be your real `https://*.vercel.app` 
     - Production dashboard endpoint: `https://<your-production-domain>/api/stripe/webhook`
     - Listen for `checkout.session.completed`
     - Copy the signing secret into `STRIPE_WEBHOOK_SECRET`
-11. Generate `ENCRYPTION_KEY` for later BYOK storage:
+11. Generate `ENCRYPTION_KEY` for BYOK storage:
     - `openssl rand -base64 32`
-12. Add all env vars to `.env.local` and to Vercel Project Settings > Environment Variables.
-13. Install and run locally:
+12. Create a Brave Search API key and set `BRAVE_SEARCH_API_KEY`. This is the platform-level web search tool secret.
+13. Run both migrations in order:
+    - `supabase/migrations/20260718000000_initial_schema.sql`
+    - `supabase/migrations/20260718001000_agent_chat_schema.sql`
+14. Add all env vars to `.env.local` and to Vercel Project Settings > Environment Variables.
+15. Install and run locally:
     - `pnpm install`
     - `pnpm dev`
-14. Deploy on Vercel:
+16. Deploy on Vercel:
     - Connect the GitHub repo in Vercel, or run `vercel deploy`
     - Use the included `vercel.json` defaults.
 
@@ -107,22 +112,38 @@ RLS:
 - Authenticated users can select only their own rows.
 - Users can update only their own profile.
 - Wallet, ledger, coupon, and payment writes are performed server-side with the Supabase service role.
+- Provider key rows use RLS and column-level grants so authenticated clients can select only non-secret metadata. `encrypted_key` is never selected in browser-facing code.
+
+Agent/chat tables:
+
+- `provider_keys`: encrypted BYOK metadata for OpenAI, Anthropic, Kimi, and custom OpenAI-compatible endpoints.
+- `chats`: user chat threads pinned to one provider key and model.
+- `messages`: ordered chat messages with strict `seq` ordering.
+- `agent_steps`: persisted public trace entries for rationale, tool calls, tool observations, and final answer markers.
+- `usage_events`: raw provider-reported input/output/cached-token usage for each LLM call.
 
 ## File Layout
 
 ```text
 app/
+  api/chats/
   api/stripe/create-checkout-session/route.ts
   api/stripe/webhook/route.ts
+  api/provider-keys/test/route.ts
   api/wallet/route.ts
+  app/[chatId]/page.tsx
   app/page.tsx
+  app/settings/keys/
   auth/callback/route.ts
   login/
   paywall/
 components/ui/
 lib/
+  agent/
   credits.ts
+  crypto.ts
   env.ts
+  models.ts
   stripe.ts
   supabase/
 middleware.ts
