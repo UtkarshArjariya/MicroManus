@@ -1,27 +1,37 @@
 import { NextResponse } from "next/server";
 
+import { jsonInternalError, logServerError } from "@/lib/server-errors";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+  let userId: string | undefined;
 
-  if (userError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    userId = user.id;
+    const { data, error } = await supabase
+      .from("credit_wallets")
+      .select("balance")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      logServerError("api/wallet.query", error, { userId });
+      return jsonInternalError("Could not load wallet");
+    }
+
+    return NextResponse.json({ balance: data?.balance ?? 0 });
+  } catch (error) {
+    logServerError("api/wallet", error, { userId });
+    return jsonInternalError();
   }
-
-  const { data, error } = await supabase
-    .from("credit_wallets")
-    .select("balance")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (error) {
-    return NextResponse.json({ error: "Could not load wallet" }, { status: 500 });
-  }
-
-  return NextResponse.json({ balance: data?.balance ?? 0 });
 }
