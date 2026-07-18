@@ -28,44 +28,46 @@ const styles = StyleSheet.create({
     paddingVertical: 44,
     fontFamily: "Helvetica",
     fontSize: 10.5,
-    color: "#1f2933",
+    color: "#1B2430",
     lineHeight: 1.45,
   },
   eyebrow: {
-    color: "#52606d",
+    color: "#5B6570",
     fontSize: 9,
     letterSpacing: 0.8,
     marginBottom: 8,
     textTransform: "uppercase",
   },
   title: {
-    color: "#102a43",
+    color: "#1B2430",
+    fontFamily: "Times-Roman",
     fontSize: 26,
     fontWeight: 700,
     lineHeight: 1.15,
     marginBottom: 10,
   },
   meta: {
-    color: "#627d98",
+    color: "#5B6570",
     fontSize: 10,
     marginBottom: 26,
   },
   toc: {
-    backgroundColor: "#f5f7fa",
-    borderColor: "#d9e2ec",
-    borderRadius: 6,
+    backgroundColor: "#F4F1E9",
+    borderColor: "#C4C1B8",
+    borderRadius: 2,
     borderWidth: 1,
     marginBottom: 24,
     padding: 14,
   },
   tocTitle: {
-    color: "#102a43",
+    color: "#1B2430",
+    fontFamily: "Times-Roman",
     fontSize: 12,
     fontWeight: 700,
     marginBottom: 8,
   },
   tocItem: {
-    color: "#334e68",
+    color: "#5B6570",
     fontSize: 10,
     marginBottom: 4,
   },
@@ -73,9 +75,10 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   heading: {
-    borderBottomColor: "#bcccdc",
+    borderBottomColor: "#C4C1B8",
     borderBottomWidth: 1,
-    color: "#102a43",
+    color: "#1B2430",
+    fontFamily: "Times-Roman",
     fontSize: 15,
     fontWeight: 700,
     marginBottom: 8,
@@ -95,14 +98,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   source: {
-    color: "#0b7285",
+    color: "#C98A2C",
     fontSize: 9,
     marginBottom: 5,
   },
   footer: {
-    borderTopColor: "#d9e2ec",
+    borderTopColor: "#C4C1B8",
     borderTopWidth: 1,
-    color: "#829ab1",
+    color: "#5B6570",
     fontSize: 8,
     marginTop: 16,
     paddingTop: 8,
@@ -133,13 +136,13 @@ function ReportDocument({ title, generatedAt, sections, sources }: PdfReportInpu
   return (
     <Document title={title} author="MicroManus">
       <Page size="A4" style={styles.page} wrap>
-        <Text style={styles.eyebrow}>MicroManus Research Report</Text>
+        <Text style={styles.eyebrow}>MICROMANUS RESEARCH REPORT</Text>
         <Text style={styles.title}>{cleanText(title)}</Text>
         <Text style={styles.meta}>Generated on {date}</Text>
 
         {sections.length > 1 ? (
           <View style={styles.toc}>
-            <Text style={styles.tocTitle}>Table of Contents</Text>
+            <Text style={styles.tocTitle}>Table of contents</Text>
             {sections.map((section, index) => (
               <Text key={`${section.heading}-${index}`} style={styles.tocItem}>
                 {index + 1}. {cleanText(section.heading)}
