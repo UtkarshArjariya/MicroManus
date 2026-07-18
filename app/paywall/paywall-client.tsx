@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { InterfaceNotice } from "@/components/interface-notice";
-import { STRIPE_UNLOCK_COPY } from "@/lib/credits";
+import { CREDIT_UNLOCK_AMOUNT, STRIPE_UNLOCK_PRICE_DISPLAY } from "@/lib/credits";
 import { parseJsonResponse } from "@/lib/http";
 
 type PaywallClientProps = {
@@ -105,7 +105,9 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
     <div className="grid border border-ink/20 md:grid-cols-2">
       <Card className="rounded-none border-0 border-b border-ink/20 bg-paper-surface md:border-b-0 md:border-r">
         <CardHeader className="pb-4">
-          <p className="utility-label">Option 01</p>
+          <p className="utility-label">
+            Option <span className="font-mono">01</span>
+          </p>
           <CardTitle className="mt-2 flex items-center gap-2 text-2xl">
             <Ticket aria-hidden="true" className="h-5 w-5 text-ochre" />
             Coupon code
@@ -125,7 +127,9 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
             {couponState.error ? <InterfaceNotice tone="error">{couponState.error}</InterfaceNotice> : null}
             <Button className="w-full" disabled={isRedeeming} type="submit">
               {isRedeeming ? <Loader2 aria-hidden="true" className="animate-spin" /> : <Ticket aria-hidden="true" />}
-              Unlock 5 credits
+              <span>
+                Unlock <span className="font-mono tabular-nums">{CREDIT_UNLOCK_AMOUNT}</span> credits
+              </span>
             </Button>
           </form>
         </CardContent>
@@ -133,12 +137,14 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
 
       <Card className="rounded-none border-0 bg-paper-surface">
         <CardHeader className="pb-4">
-          <p className="utility-label">Option 02</p>
+          <p className="utility-label">
+            Option <span className="font-mono">02</span>
+          </p>
           <CardTitle className="mt-2 flex items-center gap-2 text-2xl">
             <CreditCard aria-hidden="true" className="h-5 w-5 text-ochre" />
             Card payment
           </CardTitle>
-          <CardDescription>Use Stripe Checkout for a one-time credit purchase.</CardDescription>
+          <CardDescription>Make a one-time domestic card payment for five research credits.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {pollMessage ? <InterfaceNotice tone="success">{pollMessage}</InterfaceNotice> : null}
@@ -154,7 +160,10 @@ export function PaywallClient({ paymentCancelled, paymentSuccess }: PaywallClien
             ) : (
               <CreditCard aria-hidden="true" />
             )}
-            {STRIPE_UNLOCK_COPY}
+            <span>
+              Pay <span className="font-mono tabular-nums">{STRIPE_UNLOCK_PRICE_DISPLAY}</span> for{" "}
+              <span className="font-mono tabular-nums">{CREDIT_UNLOCK_AMOUNT}</span> credits
+            </span>
           </Button>
         </CardContent>
       </Card>
