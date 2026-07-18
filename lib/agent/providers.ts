@@ -32,6 +32,7 @@ export type ProviderCredentials = {
   apiKey: string;
   baseUrl: string | null;
   model: string;
+  promptCacheKey?: string;
 };
 
 type OpenAiMessage = {
@@ -168,6 +169,9 @@ async function callOpenAiCompatible(
       tools: openAiTools,
       tool_choice: "auto",
       temperature: 0.2,
+      ...(credentials.provider === "kimi" && credentials.promptCacheKey
+        ? { prompt_cache_key: credentials.promptCacheKey }
+        : {}),
     }),
   });
 
