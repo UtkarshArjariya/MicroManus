@@ -1,6 +1,11 @@
 import { redirect } from "next/navigation";
 
 import { ChatClient } from "@/app/app/chat-client";
+import {
+  REPORT_SIGNED_URL_TTL_SECONDS,
+  createReportSignedUrl,
+  type SignedReportArtifact,
+} from "@/lib/report-artifacts";
 import { createClient } from "@/lib/supabase/server";
 
 export async function AppShell({ selectedChatId }: { selectedChatId: string | null }) {
@@ -29,9 +34,6 @@ export async function AppShell({ selectedChatId }: { selectedChatId: string | nu
   ]);
 
   const balance = wallet?.balance ?? 0;
-  if (balance <= 0) {
-    redirect("/paywall");
-  }
 
   const selectedChat = selectedChatId
     ? chats?.find((chat) => chat.id === selectedChatId)
@@ -62,6 +64,23 @@ export async function AppShell({ selectedChatId }: { selectedChatId: string | nu
         .order("step_index", { ascending: true })
     : { data: [] };
   const steps = loadedSteps ?? [];
+  const { data: loadedArtifacts } = assistantMessageIds.length > 0
+    ? await supabase
+        .from("report_artifacts")
+        .select("id, message_id, title, storage_path, created_at")
+        .in("message_id", assistantMessageIds)
+        .order("created_at", { ascending: true })
+    : { data: [] };
+  const artifacts = await Promise.all(
+    (loadedArtifacts ?? []).map(async (artifact) => {
+      const signedUrl = await createReportSignedUrl(artifact.storage_path, artifact.title);
+      return {
+        ...artifact,
+        signed_url: signedUrl,
+        expires_at: new Date(Date.now() + REPORT_SIGNED_URL_TTL_SECONDS * 1000).toISOString(),
+      } satisfies SignedReportArtifact;
+    }),
+  );
 
   return (
     <ChatClient
@@ -70,6 +89,7 @@ export async function AppShell({ selectedChatId }: { selectedChatId: string | nu
       keys={keys ?? []}
       messages={messages}
       steps={steps}
+      artifacts={artifacts}
       balance={balance}
     />
   );
