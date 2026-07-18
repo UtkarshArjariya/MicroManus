@@ -122,9 +122,9 @@ export const MODEL_PRICING: ModelPricing[] = [
     label: "GPT-4.1 (legacy fallback)",
     inputPricePerM: 2,
     outputPricePerM: 8,
-    cachedInputPricePerM: null,
-    supportsPromptCaching: false,
-    note: "Approximate fallback/legacy price. Verify current price before production cost display.",
+    cachedInputPricePerM: 0.5,
+    supportsPromptCaching: true,
+    note: "Legacy fallback; pricing can change and should be reviewed periodically.",
   },
   {
     provider: "anthropic",
