@@ -49,6 +49,12 @@ function normalizeApiFormat(provider: ProviderId, value: string): ProviderApiFor
     return value;
   }
 
+  if (provider === "openai" && (value === "openai" || value === "openai_responses")) {
+    // Existing OpenAI keys remain on Chat Completions unless the user changes
+    // them; newly-created keys get the Responses default from lib/models.
+    return value;
+  }
+
   return getProviderApiFormat(provider);
 }
 
