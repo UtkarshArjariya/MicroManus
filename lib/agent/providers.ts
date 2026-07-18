@@ -49,13 +49,17 @@ type OpenAiMessage = {
 };
 
 type AnthropicContentBlock =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; cache_control?: { type: "ephemeral" } }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content: string };
 
 type AnthropicMessage = {
   role: "user" | "assistant";
   content: string | AnthropicContentBlock[];
+};
+
+type AnthropicTool = (typeof anthropicTools)[number] & {
+  cache_control?: { type: "ephemeral" };
 };
 
 export function parseToolArguments(value: string | undefined): Record<string, unknown> {
@@ -175,6 +179,7 @@ async function callOpenAiCompatible(
     usage?: {
       prompt_tokens?: number;
       completion_tokens?: number;
+      cached_tokens?: number;
       prompt_tokens_details?: {
         cached_tokens?: number;
       };
@@ -199,7 +204,10 @@ async function callOpenAiCompatible(
     usage: {
       inputTokens: payload?.usage?.prompt_tokens ?? 0,
       outputTokens: payload?.usage?.completion_tokens ?? 0,
-      cachedInputTokens: payload?.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+      cachedInputTokens:
+        payload?.usage?.prompt_tokens_details?.cached_tokens ??
+        payload?.usage?.cached_tokens ??
+        0,
     },
   };
 }
@@ -226,6 +234,19 @@ async function callAnthropic(
     .filter((message) => message.role === "system")
     .map((message) => message.content)
     .join("\n\n");
+  const cachedSystem: AnthropicContentBlock[] = [
+    {
+      type: "text",
+      text: system,
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+  const cachedTools: AnthropicTool[] = anthropicTools.map((tool, index) => ({
+    ...tool,
+    ...(index === anthropicTools.length - 1
+      ? { cache_control: { type: "ephemeral" } as const }
+      : {}),
+  }));
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -237,9 +258,9 @@ async function callAnthropic(
     body: JSON.stringify({
       model: credentials.model,
       max_tokens: 4096,
-      system,
+      system: cachedSystem,
       messages: workingMessages,
-      tools: anthropicTools,
+      tools: cachedTools,
       temperature: 0.2,
     }),
   });
@@ -280,7 +301,10 @@ async function callAnthropic(
     toolCalls,
     rawAssistantMessage: content,
     usage: {
-      inputTokens: payload?.usage?.input_tokens ?? 0,
+      inputTokens:
+        (payload?.usage?.input_tokens ?? 0) +
+        (payload?.usage?.cache_creation_input_tokens ?? 0) +
+        (payload?.usage?.cache_read_input_tokens ?? 0),
       outputTokens: payload?.usage?.output_tokens ?? 0,
       cachedInputTokens: payload?.usage?.cache_read_input_tokens ?? 0,
     },
