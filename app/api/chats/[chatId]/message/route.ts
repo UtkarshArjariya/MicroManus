@@ -9,6 +9,8 @@ import { jsonInternalError, logServerError } from "@/lib/server-errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
+export const maxDuration = 300;
+
 type MessageRole = "user" | "assistant" | "system" | "tool";
 
 const MAX_MESSAGE_CHARS = 8_000;
