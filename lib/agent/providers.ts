@@ -9,7 +9,7 @@ import {
 import { anthropicTools, openAiTools } from "@/lib/agent/tools";
 import { logServerError } from "@/lib/server-errors";
 
-const PROVIDER_TIMEOUT_MS = 60_000;
+const PROVIDER_TIMEOUT_MS = 150_000;
 
 export type ChatMessage = {
   role: "user" | "assistant" | "system" | "tool";
