@@ -56,6 +56,7 @@ type CreditLedgerRow = {
 };
 
 type MoneyBreakdown = {
+  pricingAvailable: boolean;
   input: number;
   output: number;
   cached: number;
@@ -92,16 +93,13 @@ function numberValue(value: number | string | null | undefined) {
 
 function eventCost(event: UsageEvent): MoneyBreakdown {
   const stored = {
+    pricingAvailable: true,
     input: numberValue(event.input_cost_usd),
     output: numberValue(event.output_cost_usd),
     cached: numberValue(event.cached_cost_usd),
     cacheWrite: numberValue(event.cache_write_cost_usd),
     total: numberValue(event.total_cost_usd),
   };
-
-  if (stored.total > 0 || event.input_tokens + event.output_tokens + event.cached_input_tokens + event.cache_write_tokens === 0) {
-    return stored;
-  }
 
   const computed = calculateUsageCost({
     provider: event.provider,
@@ -112,7 +110,16 @@ function eventCost(event: UsageEvent): MoneyBreakdown {
     cache_write_tokens: event.cache_write_tokens,
   });
 
+  if (!computed.pricing_available) {
+    return { ...stored, pricingAvailable: false };
+  }
+
+  if (stored.total > 0 || event.input_tokens + event.output_tokens + event.cached_input_tokens + event.cache_write_tokens === 0) {
+    return stored;
+  }
+
   return {
+    pricingAvailable: true,
     input: computed.input_cost_usd,
     output: computed.output_cost_usd,
     cached: computed.cached_cost_usd,
@@ -123,6 +130,7 @@ function eventCost(event: UsageEvent): MoneyBreakdown {
 
 function addCost(a: MoneyBreakdown, b: MoneyBreakdown): MoneyBreakdown {
   return {
+    pricingAvailable: a.pricingAvailable && b.pricingAvailable,
     input: a.input + b.input,
     output: a.output + b.output,
     cached: a.cached + b.cached,
@@ -138,6 +146,10 @@ function formatMoney(value: number) {
     minimumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
     maximumFractionDigits: value > 0 && value < 0.01 ? 6 : 2,
   }).format(value);
+}
+
+function formatCost(cost: MoneyBreakdown) {
+  return cost.pricingAvailable ? formatMoney(cost.total) : "Cost unavailable";
 }
 
 function formatNumber(value: number) {
@@ -162,6 +174,14 @@ function sortLink(sort: string, currentSort: string, currentDir: string, selecte
 }
 
 function CostSplit({ cost }: { cost: MoneyBreakdown }) {
+  if (!cost.pricingAvailable) {
+    return (
+      <div className="mt-1 hidden font-mono text-[0.62rem] leading-4 text-ink-muted xl:block">
+        Pricing unavailable for one or more models
+      </div>
+    );
+  }
+
   return (
     <div className="mt-1 hidden whitespace-nowrap font-mono text-[0.62rem] leading-4 text-ink-muted xl:block">
       in {formatMoney(cost.input)} · out {formatMoney(cost.output)} · cache read {formatMoney(cost.cached)} · cache write {formatMoney(cost.cacheWrite)}
@@ -251,7 +271,7 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
     const assistantIds = new Set(chatMessages.filter((message) => message.role === "assistant").map((message) => message.id));
     const cost = chatUsage.reduce(
       (acc, event) => addCost(acc, eventCost(event)),
-      { input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0 },
+      { pricingAvailable: true, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0 },
     );
 
     return {
@@ -284,10 +304,13 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
   const selected = selectedChatId ? stats.find((item) => item.id === selectedChatId) : stats[0];
   const totalCost = stats.reduce(
     (acc, item) => addCost(acc, item.cost),
-    { input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0 },
+    { pricingAvailable: true, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0 },
   );
-  const providerCosts = usageRows.reduce<Record<string, number>>((acc, event) => {
-    acc[event.provider] = (acc[event.provider] ?? 0) + eventCost(event).total;
+  const providerCosts = usageRows.reduce<Record<string, MoneyBreakdown>>((acc, event) => {
+    acc[event.provider] = addCost(
+      acc[event.provider] ?? { pricingAvailable: true, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0 },
+      eventCost(event),
+    );
     return acc;
   }, {});
   const totalCreditsUsed = ledgerRows.reduce((sum, row) => sum + Math.abs(row.delta), 0);
@@ -310,9 +333,9 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
           <div className="mt-8 grid grid-cols-2 border-y border-ink/25 md:grid-cols-[1fr_1fr_1.5fr_auto]">
             <div className="border-b border-r border-ink/15 p-4 md:border-b-0 sm:p-5">
               <p className="utility-label">Provider cost</p>
-              <p className="mt-2 font-mono text-2xl font-semibold sm:text-3xl">{formatMoney(totalCost.total)}</p>
+              <p className="mt-2 font-mono text-2xl font-semibold sm:text-3xl">{formatCost(totalCost)}</p>
               <p className="mt-2 font-mono text-[0.68rem] leading-5 text-ink-muted">
-                {Object.entries(providerCosts).map(([provider, cost]) => `${provider} ${formatMoney(cost)}`).join(" · ") || "No provider usage recorded"}
+                {Object.entries(providerCosts).map(([provider, cost]) => `${provider} ${formatCost(cost)}`).join(" · ") || "No provider usage recorded"}
               </p>
             </div>
             <div className="border-b border-ink/15 p-4 md:border-b-0 md:border-r sm:p-5">
@@ -398,7 +421,7 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
                     <td className="hidden px-3 py-4 text-right font-mono lg:table-cell">{formatNumber(chat.cachedTokens)}</td>
                     <td className="hidden px-3 py-4 text-right font-mono xl:table-cell">{formatNumber(chat.cacheWriteTokens)}</td>
                     <td className="px-3 py-4 text-right">
-                      <p className="font-mono font-semibold">{formatMoney(chat.cost.total)}</p>
+                      <p className="font-mono font-semibold">{formatCost(chat.cost)}</p>
                       <CostSplit cost={chat.cost} />
                     </td>
                     <td className="px-3 py-4 text-right font-mono">{formatNumber(chat.creditsSpent)}</td>
@@ -429,7 +452,7 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
                 const events = selectedUsage.filter((event) => event.message_id === message.id);
                 const cost = events.reduce(
                   (acc, event) => addCost(acc, eventCost(event)),
-                  { input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0 },
+                  { pricingAvailable: true, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0 },
                 );
                 const inputTokens = events.reduce(
                   (sum, event) => sum + Math.max(event.input_tokens - event.cached_input_tokens - event.cache_write_tokens, 0),
@@ -455,10 +478,14 @@ export default async function StatsPage({ searchParams }: { searchParams: StatsS
                       </p>
                     </div>
                     <div className="text-xs md:text-right">
-                      <p className="font-mono font-semibold">{formatMoney(cost.total)}</p>
-                      <p className="mt-1 font-mono text-[0.65rem] text-ink-muted">
-                        {formatMoney(cost.input)} in · {formatMoney(cost.output)} out · {formatMoney(cost.cached)} cache read · {formatMoney(cost.cacheWrite)} cache write
-                      </p>
+                      <p className="font-mono font-semibold">{formatCost(cost)}</p>
+                      {cost.pricingAvailable ? (
+                        <p className="mt-1 font-mono text-[0.65rem] text-ink-muted">
+                          {formatMoney(cost.input)} in · {formatMoney(cost.output)} out · {formatMoney(cost.cached)} cache read · {formatMoney(cost.cacheWrite)} cache write
+                        </p>
+                      ) : (
+                        <p className="mt-1 font-mono text-[0.65rem] text-ink-muted">Pricing unavailable for one or more models</p>
+                      )}
                     </div>
                   </div>
                 );
