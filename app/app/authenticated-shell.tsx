@@ -16,6 +16,7 @@ import {
   Palette,
   Plus,
   Settings,
+  ShieldCheck,
   Sun,
   UserRound,
   X,
@@ -66,6 +67,7 @@ export type WorkspaceUser = {
   name: string;
   email: string;
   avatarUrl: string | null;
+  isAdmin: boolean;
 };
 
 type SettingsTab = "profile" | "appearance" | "api-keys" | "billing";
@@ -183,6 +185,14 @@ function AccountControl({
           <Settings className="h-4 w-4" aria-hidden="true" />
           Open settings
         </DropdownMenuItem>
+        {user.isAdmin ? (
+          <DropdownMenuItem asChild>
+            <Link href="/admin">
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+              Admin dashboard
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <form action={signOut}>
           <DropdownMenuItem asChild className="text-brick focus:bg-brick/10 focus:text-brick">
