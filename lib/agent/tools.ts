@@ -18,8 +18,8 @@ type SearchResult = {
   snippet: string;
 };
 
-const MAX_WEB_SEARCHES_PER_TURN = 8;
-const MAX_PAGE_FETCHES_PER_TURN = 10;
+const MAX_WEB_SEARCHES_PER_TURN = 4;
+const MAX_PAGE_FETCHES_PER_TURN = 4;
 const TOOL_TIMEOUT_MS = 15_000;
 const MAX_FETCH_CONTENT_LENGTH = 2_000_000;
 const MAX_PAGE_REDIRECTS = 5;
@@ -123,7 +123,8 @@ export const openAiTools = [
         properties: {
           title: {
             type: "string",
-            description: "The report title.",
+            minLength: 8,
+            description: "A descriptive report title. Never use placeholder text.",
           },
           sections: {
             type: "array",
@@ -133,17 +134,19 @@ export const openAiTools = [
               properties: {
                 heading: {
                   type: "string",
+                  minLength: 3,
                   description: "The section heading.",
                 },
                 content: {
                   type: "string",
-                  description: "The section body. Include source attributions inline where claims depend on sources.",
+                  minLength: 180,
+                  description: "A substantive section body. Include source attributions inline where claims depend on sources; never use placeholder text.",
                 },
               },
               required: ["heading", "content"],
               additionalProperties: false,
             },
-            minItems: 1,
+            minItems: 3,
           },
           sources: {
             type: "array",
@@ -199,7 +202,8 @@ export const anthropicTools = [
       properties: {
         title: {
           type: "string",
-          description: "The report title.",
+          minLength: 8,
+          description: "A descriptive report title. Never use placeholder text.",
         },
         sections: {
           type: "array",
@@ -207,19 +211,21 @@ export const anthropicTools = [
           items: {
             type: "object",
             properties: {
-              heading: {
-                type: "string",
-                description: "The section heading.",
-              },
-              content: {
-                type: "string",
-                description: "The section body. Include source attributions inline where claims depend on sources.",
+            heading: {
+              type: "string",
+              minLength: 3,
+              description: "The section heading.",
+            },
+            content: {
+              type: "string",
+              minLength: 180,
+              description: "A substantive section body. Include source attributions inline where claims depend on sources; never use placeholder text.",
               },
             },
             required: ["heading", "content"],
             additionalProperties: false,
           },
-          minItems: 1,
+        minItems: 3,
         },
         sources: {
           type: "array",
@@ -473,12 +479,12 @@ function parseGeneratePdfReportInput(input: unknown): GeneratePdfReportInput | {
     sources?: unknown;
   };
   const title = typeof value.title === "string" ? value.title.trim() : "";
-  if (!title) {
-    return { error: "Report title is required." };
+  if (title.length < 8) {
+    return { error: "Use a descriptive report title of at least 8 characters; placeholder titles are not accepted." };
   }
 
-  if (!Array.isArray(value.sections) || value.sections.length === 0) {
-    return { error: "At least one report section is required." };
+  if (!Array.isArray(value.sections) || value.sections.length < 3) {
+    return { error: "A substantive PDF report needs at least three headed sections." };
   }
 
   const sections = value.sections
@@ -490,7 +496,7 @@ function parseGeneratePdfReportInput(input: unknown): GeneratePdfReportInput | {
       const item = section as { heading?: unknown; content?: unknown };
       const heading = typeof item.heading === "string" ? item.heading.trim() : "";
       const content = typeof item.content === "string" ? item.content.trim() : "";
-      if (!heading || !content) {
+      if (heading.length < 3 || content.length < 180) {
         return null;
       }
 
@@ -501,8 +507,8 @@ function parseGeneratePdfReportInput(input: unknown): GeneratePdfReportInput | {
     })
     .filter((section): section is PdfReportSection => Boolean(section));
 
-  if (sections.length === 0) {
-    return { error: "Report sections must include headings and content." };
+  if (sections.length < 3 || sections.reduce((total, section) => total + section.content.length, 0) < 600) {
+    return { error: "The PDF report needs at least three substantive sections and 600 total characters of synthesized content; placeholders are not accepted." };
   }
 
   const sources = Array.isArray(value.sources)
