@@ -133,6 +133,7 @@ This turn is a deep-research task. Use web_search and fetch_page in a genuine it
 - State a brief public research plan.
 - Run at least two meaningfully distinct searches covering different angles.
 - Successfully read at least two relevant pages; never synthesize from search snippets alone.
+- Stop after at most four searches and four page reads; once the minimum evidence is sufficient, synthesize immediately.
 - Cross-check important claims for agreement, disagreement, dates, and source quality.
 - Cite source domains or links inline with source-dependent claims.
 Do not give a final synthesis until those minimum source checks are complete. ${artifact}`;
@@ -249,6 +250,8 @@ export async function runAgent(options: AgentRunOptions) {
   let researchCorrections = 0;
   let artifactCorrections = 0;
   let artifactCreated = false;
+  let artifactTitle = "the requested report";
+  let artifactSourceCount = 0;
   let finalAnswer = "";
 
   for (let i = 0; i < MAX_AGENT_STEPS; i += 1) {
@@ -317,7 +320,12 @@ export async function runAgent(options: AgentRunOptions) {
         return finalAnswer;
       }
 
-      finalAnswer = response.content || "The provider returned no answer. Retry this turn or choose another model.";
+      const providerAnswer = response.content.trim();
+      const contradictsCreatedArtifact = artifactCreated &&
+        /\b(?:could not|couldn['’]?t|cannot|can['’]?t|unable to|failed to)\b[\s\S]{0,120}\b(?:complete|create|generate|produce|finish)\b[\s\S]{0,80}\b(?:pdf|report|research)\b/i.test(providerAnswer);
+      finalAnswer = contradictsCreatedArtifact
+        ? `The cited PDF report “${artifactTitle}” is ready. It synthesizes ${artifactSourceCount} verified source${artifactSourceCount === 1 ? "" : "s"}; use the report card below to download it.`
+        : providerAnswer || "The provider returned no answer. Retry this turn or choose another model.";
       await options.onStep({
         type: "final_answer",
         toolOutput: { content: finalAnswer },
@@ -371,6 +379,8 @@ export async function runAgent(options: AgentRunOptions) {
 
       if (artifact) {
         artifactCreated = true;
+        artifactTitle = artifact.title;
+        artifactSourceCount = visitedSources.size;
         await options.onStep({
           type: "artifact",
           toolName: toolCall.name,
