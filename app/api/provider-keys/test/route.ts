@@ -143,6 +143,7 @@ export async function POST(request: Request) {
 
     provider = body?.provider;
     let apiKey = body?.apiKey?.trim() ?? "";
+    let testedSavedKeyId: string | null = null;
     let baseUrl = body?.baseUrl?.trim() || (provider ? getDefaultBaseUrl(provider) : "");
     let model = body?.model?.trim() ?? "";
     let apiFormat = provider === "openai_compatible"
@@ -174,6 +175,7 @@ export async function POST(request: Request) {
       apiFormat = savedKey.api_format as ProviderApiFormat;
       baseUrl = savedKey.base_url || getDefaultBaseUrl(provider);
       model = body?.model?.trim() || savedKey.default_model;
+      testedSavedKeyId = body.providerKeyId;
     }
 
     if (!provider || !PROVIDERS.has(provider)) {
@@ -213,6 +215,22 @@ export async function POST(request: Request) {
     } catch (error) {
       logServerError("api/provider-keys/test.provider", error, { userId, provider });
       return jsonError(error instanceof Error ? error.message : "Connection test failed.", 502);
+    }
+
+    if (testedSavedKeyId) {
+      const admin = createAdminClient();
+      const { error: timestampError } = await admin
+        .from("provider_keys")
+        .update({ last_tested_at: new Date().toISOString() })
+        .eq("id", testedSavedKeyId)
+        .eq("user_id", user.id);
+
+      if (timestampError) {
+        logServerError("api/provider-keys/test.timestamp", timestampError, {
+          userId,
+          providerKeyId: testedSavedKeyId,
+        });
+      }
     }
 
     return NextResponse.json({ ok: true });
