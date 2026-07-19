@@ -7,6 +7,10 @@ function isPublicPath(pathname: string) {
   return pathname === "/login" || pathname === "/paywall" || pathname.startsWith("/auth/");
 }
 
+function isAdminPath(pathname: string) {
+  return pathname === "/admin" || pathname.startsWith("/admin/");
+}
+
 function redirectWithCookies(url: URL, response: NextResponse) {
   const redirectResponse = NextResponse.redirect(url);
   response.cookies.getAll().forEach((cookie) => {
@@ -23,6 +27,16 @@ async function getWalletBalance(supabase: SupabaseClient, userId: string) {
     .maybeSingle();
 
   return data?.balance ?? 0;
+}
+
+async function getIsAdmin(supabase: SupabaseClient, userId: string) {
+  const { data } = await supabase
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return data?.is_admin === true;
 }
 
 export async function middleware(request: NextRequest) {
@@ -68,6 +82,21 @@ export async function middleware(request: NextRequest) {
     destination.pathname = balance > 0 ? "/app" : "/paywall";
     destination.search = "";
     return redirectWithCookies(destination, response);
+  }
+
+  if (user && isAdminPath(pathname)) {
+    const isAdmin = await getIsAdmin(supabase, user.id);
+
+    if (!isAdmin) {
+      const destination = request.nextUrl.clone();
+      destination.pathname = "/app";
+      destination.search = "";
+      return redirectWithCookies(destination, response);
+    }
+
+    // Admin access does not consume research credits. Every admin page repeats
+    // this check with the service role before loading any cross-user data.
+    return response;
   }
 
   if (user && !isPublicPath(pathname)) {
