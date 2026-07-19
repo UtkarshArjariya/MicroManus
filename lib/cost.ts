@@ -12,6 +12,7 @@ export type UsageCostInput = {
 };
 
 export type UsageCost = {
+  pricing_available: boolean;
   input_cost_usd: number;
   output_cost_usd: number;
   cached_cost_usd: number;
@@ -35,6 +36,7 @@ export function calculateUsageCost(row: UsageCostInput): UsageCost {
   const pricing = findModelPricing(row.provider, row.model);
   if (!pricing) {
     return {
+      pricing_available: false,
       input_cost_usd: 0,
       output_cost_usd: 0,
       cached_cost_usd: 0,
@@ -58,6 +60,7 @@ export function calculateUsageCost(row: UsageCostInput): UsageCost {
   const totalCost = inputCost + outputCost + cachedCost + cacheWriteCost;
 
   return {
+    pricing_available: true,
     input_cost_usd: roundUsd(inputCost),
     output_cost_usd: roundUsd(outputCost),
     cached_cost_usd: roundUsd(cachedCost),
