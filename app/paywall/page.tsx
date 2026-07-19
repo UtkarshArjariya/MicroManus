@@ -67,7 +67,7 @@ export default async function PaywallPage({ searchParams }: PaywallPageProps) {
               Add credits to open the desk
             </h1>
             <p className="mt-4 max-w-xl text-base leading-7 text-ink-muted">
-              Redeem the launch code or pay by card. Either option adds five research credits to your account.
+              Redeem a coupon for its configured value, or pay by card to add five research credits.
             </p>
           </div>
           <div className="mt-8">
