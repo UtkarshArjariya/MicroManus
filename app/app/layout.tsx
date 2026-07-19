@@ -11,7 +11,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
 
   if (!user) redirect("/login");
 
-  const [{ data: wallet }, { data: keys = [] }, { data: chats = [] }] = await Promise.all([
+  const [{ data: wallet }, { data: keys = [] }, { data: chats = [] }, { data: profile }] = await Promise.all([
     supabase.from("credit_wallets").select("balance").eq("user_id", user.id).maybeSingle(),
     supabase
       .from("provider_keys")
@@ -24,6 +24,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
       .eq("user_id", user.id)
       .eq("archived", false)
       .order("updated_at", { ascending: false }),
+    supabase.from("profiles").select("is_admin").eq("id", user.id).maybeSingle(),
   ]);
 
   const balance = wallet?.balance ?? 0;
@@ -55,7 +56,7 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
       balance={balance}
       chats={chatsWithReports}
       keys={keys ?? []}
-      user={{ name, email, avatarUrl }}
+      user={{ name, email, avatarUrl, isAdmin: profile?.is_admin === true }}
     >
       {children}
     </AuthenticatedShell>
