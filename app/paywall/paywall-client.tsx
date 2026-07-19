@@ -144,7 +144,7 @@ export function PaywallClient({
             <Ticket aria-hidden="true" className="h-5 w-5 text-ochre" />
             Coupon code
           </CardTitle>
-          <CardDescription>Redeem the launch code for five research credits.</CardDescription>
+          <CardDescription>Enter an active coupon to add its configured credits.</CardDescription>
         </CardHeader>
         <CardContent>
           <form action={couponAction} className="space-y-3">
@@ -155,14 +155,12 @@ export function PaywallClient({
               autoComplete="off"
               className="font-mono"
               name="code"
-              placeholder="SID_DRDROID"
+              placeholder="ENTER_COUPON"
             />
             {couponState.error ? <InterfaceNotice tone="error">{couponState.error}</InterfaceNotice> : null}
             <Button className="w-full" disabled={isRedeeming} type="submit">
               {isRedeeming ? <Loader2 aria-hidden="true" className="animate-spin" /> : <Ticket aria-hidden="true" />}
-              <span>
-                Unlock <span className="font-mono tabular-nums">{CREDIT_UNLOCK_AMOUNT}</span> credits
-              </span>
+              <span>Redeem coupon</span>
             </Button>
           </form>
         </CardContent>
